@@ -1,0 +1,24 @@
+# package directories
+node_modules
+jspm_packages
+
+# Serverless directories
+.serverless
+
+# Coveralls
+coverage
+
+# Editor
+.vscode
+
+# nyc
+.nyc_output
+
+# Secrets
+secrets.txt
+
+# Terraform infra
+infra.json
+
+# serverless webpack
+.webpack/

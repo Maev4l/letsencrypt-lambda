@@ -1,0 +1,17 @@
+{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "_acme-challenge.isnan.eu.",
+        "Type": "TXT",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "\"challengetxt\""
+          }
+        ]
+      }
+    }
+  ]
+}
