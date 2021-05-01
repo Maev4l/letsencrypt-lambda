@@ -8,5 +8,6 @@ module.exports = {
     'import/prefer-default-export': 'off',
     'no-await-in-loop': 'off',
     'no-constant-condition': 'off',
+    'no-restricted-syntax': 'off',
   },
 };

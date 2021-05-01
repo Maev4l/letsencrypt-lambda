@@ -2,14 +2,14 @@ import acme from 'acme-client';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   Route53Client,
-  ListHostedZonesByNameCommand,
   ListResourceRecordSetsCommand,
   ChangeResourceRecordSetsCommand,
+  paginateListHostedZones,
 } from '@aws-sdk/client-route-53';
 import {
   ACMClient,
   ImportCertificateCommand,
-  ListCertificatesCommand,
+  paginateListCertificates,
   DescribeCertificateCommand,
 } from '@aws-sdk/client-acm';
 import moment from 'moment';
@@ -179,36 +179,35 @@ const createRoute53AcmeRecords = async (zoneId, domain, challengeText) => {
 
 const getZoneId = async (domain) => {
   const zoneName = domain.endsWith('.') ? domain : `${domain}.`;
-  let zonesList = await r53.send(new ListHostedZonesByNameCommand({ DNSName: zoneName }));
 
-  while (true) {
-    const { HostedZones: hostedZones, IsTruncated: hasMore } = zonesList;
+  const paginatorConfig = {
+    client: r53,
+    pageSize: 25,
+  };
 
-    const result = hostedZones.find((zone) => {
-      const { Name: name } = zone;
+  for await (const page of paginateListHostedZones(paginatorConfig, {})) {
+    const { HostedZones: zones } = page;
+    const zone = zones.find((z) => {
+      const { Name: name } = z;
       return name === zoneName;
     });
-
-    if (result) {
-      const { Id: zoneId } = result;
+    if (zone) {
+      const { Id: zoneId } = zone;
       return zoneId.replace('/hostedzone/', '');
     }
-
-    if (!hasMore) {
-      return null;
-    }
-
-    const { NextDNSName: nextZoneName, NextHostedZoneId: nextZoneId } = zonesList;
-    zonesList = await r53.send(
-      new ListHostedZonesByNameCommand({ DNSName: nextZoneName, HostedZoneId: nextZoneId }),
-    );
   }
+
+  return null;
 };
 
 const findCertificate = async (commonName) => {
-  let result = await acm.send(new ListCertificatesCommand({ MaxItems: 100 }));
-  while (true) {
-    const { NextToken: nextToken, CertificateSummaryList: summaries } = result;
+  const paginatorConfig = {
+    client: acm,
+    pageSize: 25,
+  };
+
+  for await (const page of paginateListCertificates(paginatorConfig, {})) {
+    const { CertificateSummaryList: summaries } = page;
     const certificates = summaries.filter((summary) => {
       const { DomainName: domainName } = summary;
       return commonName === domainName;
@@ -239,14 +238,9 @@ const findCertificate = async (commonName) => {
         return Certificate;
       }
     }
-
-    if (!nextToken) {
-      logger.info(`No existing certificate for common name '${commonName}'.`);
-      return null;
-    }
-
-    result = await acm.send(new ListCertificatesCommand({ MaxItems: 100, NextToken: nextToken }));
   }
+  logger.info(`No existing certificate for common name '${commonName}'.`);
+  return null;
 };
 
 const importCertificate = async (
@@ -330,43 +324,47 @@ export const renewCertificates = async (event) => {
     logger.info(`Certificate Signing Request generated.`);
 
     const zoneId = await getZoneId(route53DomainName);
-    logger.info(`Zone ID found for domain '${route53DomainName}': ${zoneId}.`);
+    if (zoneId) {
+      logger.info(`Zone ID found for domain '${route53DomainName}': ${zoneId}.`);
 
-    const directoryUrl =
-      stage === 'production'
-        ? acme.directory.letsencrypt.production
-        : acme.directory.letsencrypt.staging;
+      const directoryUrl =
+        stage === 'production'
+          ? acme.directory.letsencrypt.production
+          : acme.directory.letsencrypt.staging;
 
-    const client = new acme.Client({
-      directoryUrl,
-      accountKey,
-    });
-
-    try {
-      const certificate = await client.auto({
-        csr: certificateCsr,
-        email: 'maeval.nightingale@gmail.com',
-        termsOfServiceAgreed: true,
-        challengePriority: ['dns-01'],
-        challengeCreateFn: async (authz, challenge, keyAuthorization) => {
-          await createRoute53AcmeRecords(zoneId, route53DomainName, keyAuthorization);
-        },
-        challengeRemoveFn: async (/* authz, challenge, keyAuthorization */) => {
-          await resetRoute53AcmeRecords(zoneId, route53DomainName);
-        },
+      const client = new acme.Client({
+        directoryUrl,
+        accountKey,
       });
 
-      const chain = acme.forge.splitPemChain(certificate);
+      try {
+        const certificate = await client.auto({
+          csr: certificateCsr,
+          email: 'maeval.nightingale@gmail.com',
+          termsOfServiceAgreed: true,
+          challengePriority: ['dns-01'],
+          challengeCreateFn: async (authz, challenge, keyAuthorization) => {
+            await createRoute53AcmeRecords(zoneId, route53DomainName, keyAuthorization);
+          },
+          challengeRemoveFn: async (/* authz, challenge, keyAuthorization */) => {
+            await resetRoute53AcmeRecords(zoneId, route53DomainName);
+          },
+        });
 
-      await importCertificate(
-        certificatePrivateKey,
-        chain,
-        certificateCommonName,
-        existingCertificate,
-      );
-      logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${stage}).`);
-    } catch (e) {
-      logger.error(`Failed to renew certificate: ${e.toString()}.`);
+        const chain = acme.forge.splitPemChain(certificate);
+
+        await importCertificate(
+          certificatePrivateKey,
+          chain,
+          certificateCommonName,
+          existingCertificate,
+        );
+        logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${stage}).`);
+      } catch (e) {
+        logger.error(`Failed to renew certificate: ${e.toString()}.`);
+      }
+    } else {
+      logger.error(`No Zone ID for domain '${route53DomainName}.`);
     }
   } else {
     logger.info('No need for certificate renewal.');
