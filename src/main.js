@@ -4,23 +4,22 @@ import moment from 'moment';
 
 import { getLogger } from './logger';
 import config from '../config.json';
-import { importCertificate, findCertificate } from './acm';
+import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey } from './s3';
 import { getZoneId, createRoute53AcmeRecords, resetRoute53AcmeRecords } from './route53';
 
 const logger = getLogger('handler');
 
-const { route53DomainName, certificateCommonName, letsEncryptDirectory } = config;
-
 export const renewCertificates = async (event) => {
-  const { force, directory } = event;
+  // Merge configuration and invokation parameters
+  const params = { ...config, ...event };
 
-  const stage = directory || letsEncryptDirectory;
+  const { directory, force, route53DomainName, certificateCommonName } = params;
 
   logger.info(
     `Certificate renewal (force: ${
-      force ? 'true' : 'false'
-    }) (domain: '${route53DomainName}' - common name: '${certificateCommonName}') (${stage}) started ...`,
+      force ? 'yes' : 'no'
+    }) (domain: '${route53DomainName}' - common name: '${certificateCommonName}') (${directory}) started ...`,
   );
 
   let requestCertificate = false;
@@ -59,7 +58,7 @@ export const renewCertificates = async (event) => {
       logger.info(`Zone ID found for domain '${route53DomainName}': ${zoneId}.`);
 
       const directoryUrl =
-        stage === 'production'
+        directory === 'production'
           ? acme.directory.letsencrypt.production
           : acme.directory.letsencrypt.staging;
 
@@ -82,15 +81,18 @@ export const renewCertificates = async (event) => {
           },
         });
 
+        logger.info(`Account url: ${client.getAccountUrl()}`);
+
         const chain = acme.forge.splitPemChain(certificate);
 
         await importCertificate(
           certificatePrivateKey,
           chain,
           certificateCommonName,
+          directory,
           existingCertificate,
         );
-        logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${stage}).`);
+        logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${directory}).`);
       } catch (e) {
         logger.error(`Failed to renew certificate: ${e.toString()}.`);
       }
@@ -99,5 +101,53 @@ export const renewCertificates = async (event) => {
     }
   } else {
     logger.info('No need for certificate renewal.');
+  }
+};
+
+export const revokeCertificate = async (event) => {
+  const { arn, ...rest } = event;
+
+  if (arn) {
+    logger.info(`Revoking certificate (arn: ${arn})`);
+    try {
+      const accountKey = await loadAccountKey();
+
+      const result = await getCertificate(arn);
+      if (result) {
+        const { certificate, ...other } = result;
+        const { directory } = { ...other, ...rest };
+
+        logger.info(`Directory: ${directory}`);
+
+        const directoryUrl =
+          directory === 'production'
+            ? acme.directory.letsencrypt.production
+            : acme.directory.letsencrypt.staging;
+
+        const client = new acme.Client({
+          directoryUrl,
+          accountKey,
+        });
+
+        await client.createAccount({
+          email: 'maeval.nightingale@gmail.com',
+          termsOfServiceAgreed: true,
+        });
+
+        const accountUrl = client.getAccountUrl();
+        logger.info(`Account url: ${accountUrl}`);
+
+        const revokation = await client.revokeCertificate(certificate);
+        logger.info(
+          `Revoked (certificate: ${arn} - directory: ${directory}): ${JSON.stringify(revokation)}.`,
+        );
+      } else {
+        logger.error(`Certificate with ARN ${arn} does not exists.`);
+      }
+    } catch (e) {
+      logger.error(`Failed to revoke certificate (arn ${arn}): ${e.toString()}.`);
+    }
+  } else {
+    logger.info(`No ARN was specfified.`);
   }
 };

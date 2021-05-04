@@ -64,6 +64,8 @@ provider:
         - 'acm:ListCertificates'
         - 'acm:DescribeCertificate'
         - 'acm:AddTagsToCertificate'
+        - 'acm:GetCertificate'
+        - 'acm:ListTagsForCertificate'
       Resource: '*'
 
   tags:
@@ -93,6 +95,9 @@ functions:
     timeout: 120
     #events:
     #  - schedule: rate(1 day)
+  revokeCertificate:
+    handler: src/main.revokeCertificate
+    name: revoke-certificate
 
 resources:
   Resources:

@@ -6,6 +6,6 @@
   "tagApplication": "letsencrypt-lambda",
   "tagOwner": "serverless",
   "bucketName": "letsencrypt-lambda-storage",
-  "letsEncryptDirectory": "production",
+  "directory": "production",
   "s3LetsEncryptAccountKeyName": "account-key"
 }

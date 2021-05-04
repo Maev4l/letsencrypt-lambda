@@ -3,6 +3,8 @@ import {
   ImportCertificateCommand,
   paginateListCertificates,
   DescribeCertificateCommand,
+  GetCertificateCommand,
+  ListTagsForCertificateCommand,
 } from '@aws-sdk/client-acm';
 
 import config from '../config.json';
@@ -14,6 +16,37 @@ const logger = getLogger('acm');
 const { certificateRegion, tagOwner, tagApplication } = config;
 
 const acm = new ACMClient({ region: certificateRegion });
+
+const readCertificate = async (arn) => {
+  const { Certificate: certificate } = await acm.send(
+    new GetCertificateCommand({ CertificateArn: arn }),
+  );
+  return certificate;
+};
+
+const getCertificateDirectory = async (arn) => {
+  const { Tags: tags } = await acm.send(new ListTagsForCertificateCommand({ CertificateArn: arn }));
+  const tag = tags.find((t) => {
+    const { Key: key } = t;
+    return key === 'directory';
+  });
+  const { Value } = tag || {};
+  return Value || 'production';
+};
+
+export const getCertificate = async (arn) => {
+  try {
+    const certificate = await readCertificate(arn);
+    const directory = await getCertificateDirectory(arn);
+
+    return { certificate, directory };
+  } catch (e) {
+    if (e.name === 'ResourceNotFoundException') {
+      return null;
+    }
+    throw e;
+  }
+};
 
 export const findCertificate = async (commonName) => {
   const paginatorConfig = {
@@ -62,6 +95,7 @@ export const importCertificate = async (
   certificatePrivateKey,
   certificateChain,
   commonName,
+  directory,
   existingCertificate,
 ) => {
   // const existingCertificate = await findCertificate(commonName);
@@ -88,6 +122,7 @@ export const importCertificate = async (
         Tags: [
           { Key: 'application', Value: tagApplication },
           { Key: 'owner', Value: tagOwner },
+          { Key: 'directory', Value: directory },
         ],
       };
   const { CertificateArn } = await acm.send(new ImportCertificateCommand(params));
