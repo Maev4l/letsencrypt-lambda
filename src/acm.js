@@ -1,3 +1,4 @@
+import acme from 'acme-client';
 import {
   ACMClient,
   ImportCertificateCommand,
@@ -93,7 +94,7 @@ export const findCertificate = async (commonName) => {
 
 export const importCertificate = async (
   certificatePrivateKey,
-  certificateChain,
+  fullCertificate,
   commonName,
   directory,
   existingCertificate,
@@ -106,7 +107,7 @@ export const importCertificate = async (
     existingCertificateArn = CertificateArn;
   }
 
-  const [certificate, ...rest] = certificateChain;
+  const [certificate, ...rest] = acme.forge.splitPemChain(fullCertificate);
 
   const params = existingCertificateArn
     ? {

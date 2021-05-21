@@ -53,3 +53,27 @@ export const loadAccountKey = async () => {
     throw e;
   }
 };
+
+const saveObject = async (name, content) =>
+  new Promise((resolve) => {
+    s3.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: name,
+        Body: content,
+        ServerSideEncryption: 'AES256',
+        Tagging: `application=${tagApplication}&owner=${tagOwner}`,
+      }),
+    ).then(() => resolve());
+  });
+
+export const saveFullCertificate = async (fullCertificate, certificatePrivateKey) => {
+  const [certificate, intermediate, root] = acme.forge.splitPemChain(fullCertificate);
+  await Promise.all([
+    saveObject('full', fullCertificate),
+    saveObject('certificate', certificate),
+    saveObject('intermediate', intermediate),
+    saveObject('root', root),
+    saveObject('certificateKey', certificatePrivateKey),
+  ]);
+};

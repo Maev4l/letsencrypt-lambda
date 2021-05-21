@@ -5,7 +5,7 @@ import moment from 'moment';
 import { getLogger } from './logger';
 import config from '../config.json';
 import { importCertificate, findCertificate, getCertificate } from './acm';
-import { loadAccountKey } from './s3';
+import { loadAccountKey, saveFullCertificate } from './s3';
 import { getZoneId, createRoute53AcmeRecords, resetRoute53AcmeRecords } from './route53';
 
 const logger = getLogger('handler');
@@ -65,10 +65,11 @@ export const renewCertificates = async (event) => {
       const client = new acme.Client({
         directoryUrl,
         accountKey,
+        backoffAttempts: 20,
       });
 
       try {
-        const certificate = await client.auto({
+        const fullCertificate = await client.auto({
           csr: certificateCsr,
           email: 'maeval.nightingale@gmail.com',
           termsOfServiceAgreed: true,
@@ -77,17 +78,22 @@ export const renewCertificates = async (event) => {
             await createRoute53AcmeRecords(zoneId, route53DomainName, keyAuthorization);
           },
           challengeRemoveFn: async (/* authz, challenge, keyAuthorization */) => {
-            await resetRoute53AcmeRecords(zoneId, route53DomainName);
+            try {
+              await resetRoute53AcmeRecords(zoneId, route53DomainName);
+            } catch (e) {
+              logger.warn(`Failed to remove challenge: ${e.toString()}.`);
+            }
           },
         });
 
         logger.info(`Account url: ${client.getAccountUrl()}`);
 
-        const chain = acme.forge.splitPemChain(certificate);
+        await saveFullCertificate(fullCertificate, certificatePrivateKey);
+        logger.info(`Certificate saved (domain: '${route53DomainName}') (${directory}).`);
 
         await importCertificate(
           certificatePrivateKey,
-          chain,
+          fullCertificate,
           certificateCommonName,
           directory,
           existingCertificate,

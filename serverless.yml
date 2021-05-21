@@ -92,7 +92,7 @@ functions:
   renewCertificates:
     handler: src/main.renewCertificates
     name: renew-certificates
-    timeout: 120
+    timeout: 180
     events:
       - schedule: rate(5 days)
   revokeCertificate:
