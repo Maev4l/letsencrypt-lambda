@@ -38,8 +38,8 @@ export const renewCertificates = async (event) => {
       logger.info(`Existing certificate expired since ${Math.abs(diff)} day(s).`);
     }
 
-    if (diff < 10) {
-      // Certificate will expire in less than 10 days
+    if (diff < 30) {
+      // Certificate will expire in less than 30 days
       requestCertificate = true;
     }
   }
