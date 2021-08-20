@@ -24,10 +24,6 @@ provider:
   memorySize: 512
   region: ${self:custom.config.region}
   profile: serverless-admin-profile
-  # >>> Enable Gzip compression on AWS APi Gateway
-  #apiGateway:
-  #  minimumCompressionSize: 1024 # in bytes
-  # <<< Enable Gzip compression on AWS APi Gateway
   iamRoleStatements:
     - Effect: 'Allow'
       Action:
