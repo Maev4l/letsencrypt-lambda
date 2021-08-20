@@ -13,6 +13,7 @@ custom:
   config:
     bucketName: ${file(./config.json):bucketName}
     region: ${file(./config.json):region}
+    domainName: ${file(./config.json):route53DomainName}
     tagApplication: ${file(./config.json):tagApplication}
     tagOwner: ${file(./config.json):tagOwner}
 
@@ -101,6 +102,16 @@ functions:
 
 resources:
   Resources:
+    LetsEncryptChallengeRecord:
+      Type: AWS::Route53::RecordSet
+      Properties:
+        HostedZoneName: !Sub '${self:custom.config.domainName}.'
+        Name: !Sub '_acme-challenge.${self:custom.config.domainName}.'
+        Comment: DNS Challenge Record
+        Type: TXT
+        TTL: '60'
+        ResourceRecords:
+          - '"dummy"'
     LetsEncryptLambdaBucket:
       Type: AWS::S3::Bucket
       Properties:
