@@ -4392,6 +4392,18 @@ glob@^7.0.5, glob@^7.1.3, glob@^7.1.4, glob@^7.1.6:
     once "^1.3.0"
     path-is-absolute "^1.0.0"
 
+glob@^7.2.0:
+  version "7.2.0"
+  resolved "https://registry.yarnpkg.com/glob/-/glob-7.2.0.tgz#d15535af7732e02e948f4c41628bd910293f6023"
+  integrity sha512-lmLf6gtyrPq8tTjSmrO94wBeQbFR3HbLHbuyD69wuyQkImp2hWqMGB47OX65FBkPffO641IP9jWa1z4ivqG26Q==
+  dependencies:
+    fs.realpath "^1.0.0"
+    inflight "^1.0.4"
+    inherits "2"
+    minimatch "^3.0.4"
+    once "^1.3.0"
+    path-is-absolute "^1.0.0"
+
 globals@^11.1.0:
   version "11.12.0"
   resolved "https://registry.yarnpkg.com/globals/-/globals-11.12.0.tgz#ab8795338868a0babd8525758018c2a7eb95c42e"
@@ -4755,7 +4767,7 @@ is-boolean-object@^1.1.0:
   dependencies:
     call-bind "^1.0.0"
 
-is-builtin-module@^3.0.0:
+is-builtin-module@^3.1.0:
   version "3.1.0"
   resolved "https://registry.yarnpkg.com/is-builtin-module/-/is-builtin-module-3.1.0.tgz#6fdb24313b1c03b75f8b9711c0feb8c30b903b00"
   integrity sha512-OV7JjAgOTfAFJmHZLvpSTb4qi0nIILDV1gWPYDnDJUTNFM5aGlRAhk4QcT8i7TuAleeEV5Fdkqn3t4mS+Q11fg==
@@ -6525,16 +6537,16 @@ serialize-javascript@^5.0.1:
   dependencies:
     randombytes "^2.1.0"
 
-serverless-webpack@5.4.1:
-  version "5.4.1"
-  resolved "https://registry.yarnpkg.com/serverless-webpack/-/serverless-webpack-5.4.1.tgz#7d6cee2b097edc1cd05b5de559e4db3d29302df8"
-  integrity sha512-yhCFXHgbHjiSdvcFhQ+/X5Tgh+j7nnWQei37W3DVXaaJ1DDUHV2y+SrEjB3tb4JNDzUipndLzUgvspgPEPFHfg==
+serverless-webpack@5.6.0:
+  version "5.6.0"
+  resolved "https://registry.yarnpkg.com/serverless-webpack/-/serverless-webpack-5.6.0.tgz#4abf495b469e0b17d168e705b34bbcc44d0d5a37"
+  integrity sha512-merTpkO+dylC6kUStZ0bOhTVW8hAziVF9A0Jg8rHOxT25IOZviCyaOoLemL84Cvdh7YIEWlCY8UDURBRe3D9hw==
   dependencies:
     bestzip "^2.2.0"
     bluebird "^3.7.2"
     fs-extra "^9.1.0"
-    glob "^7.1.6"
-    is-builtin-module "^3.0.0"
+    glob "^7.2.0"
+    is-builtin-module "^3.1.0"
     lodash "^4.17.21"
     semver "^7.3.5"
   optionalDependencies:

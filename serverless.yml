@@ -24,46 +24,48 @@ provider:
   memorySize: 512
   region: ${self:custom.config.region}
   profile: serverless-admin-profile
-  iamRoleStatements:
-    - Effect: 'Allow'
-      Action:
-        - 's3:GetObject'
-        - 's3:ListBucket'
-      Resource:
-        - Fn::Join:
-            - ''
-            - - 'arn:aws:s3:::'
-              - Ref: LetsEncryptLambdaBucket
-              - '/*'
-        - Fn::GetAtt:
-            - LetsEncryptLambdaBucket
-            - Arn
-    - Effect: 'Allow'
-      Action:
-        - 's3:PutObject'
-        - 's3:PutObjectTagging'
-      Resource:
-        Fn::Join:
-          - ''
-          - - 'arn:aws:s3:::'
-            - Ref: LetsEncryptLambdaBucket
-            - '/*'
-    - Effect: 'Allow'
-      Action:
-        - 'route53:GetChange'
-        - 'route53:ListHostedZones'
-        - 'route53:ListResourceRecordSets'
-        - 'route53:ChangeResourceRecordSets'
-      Resource: '*'
-    - Effect: 'Allow'
-      Action:
-        - 'acm:ImportCertificate'
-        - 'acm:ListCertificates'
-        - 'acm:DescribeCertificate'
-        - 'acm:AddTagsToCertificate'
-        - 'acm:GetCertificate'
-        - 'acm:ListTagsForCertificate'
-      Resource: '*'
+  iam:
+    role:
+      statements:
+        - Effect: 'Allow'
+          Action:
+            - 's3:GetObject'
+            - 's3:ListBucket'
+          Resource:
+            - Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - Ref: LetsEncryptLambdaBucket
+                  - '/*'
+            - Fn::GetAtt:
+                - LetsEncryptLambdaBucket
+                - Arn
+        - Effect: 'Allow'
+          Action:
+            - 's3:PutObject'
+            - 's3:PutObjectTagging'
+          Resource:
+            Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - Ref: LetsEncryptLambdaBucket
+                - '/*'
+        - Effect: 'Allow'
+          Action:
+            - 'route53:GetChange'
+            - 'route53:ListHostedZones'
+            - 'route53:ListResourceRecordSets'
+            - 'route53:ChangeResourceRecordSets'
+          Resource: '*'
+        - Effect: 'Allow'
+          Action:
+            - 'acm:ImportCertificate'
+            - 'acm:ListCertificates'
+            - 'acm:DescribeCertificate'
+            - 'acm:AddTagsToCertificate'
+            - 'acm:GetCertificate'
+            - 'acm:ListTagsForCertificate'
+          Resource: '*'
 
   tags:
     application: ${self:custom.config.tagApplication}
@@ -76,14 +78,6 @@ provider:
     tags:
       application: ${self:custom.config.tagApplication}
       owner: ${self:custom.config.tagOwner}
-
-package:
-  exclude:
-    - .vscode/**
-    - .travis.yml
-    - coverage/**
-    - test/**
-    - scripts/**
 
 functions:
   renewCertificates:
