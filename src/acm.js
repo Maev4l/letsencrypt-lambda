@@ -14,19 +14,19 @@ import { getLogger } from './logger';
 
 const logger = getLogger('acm');
 
-const { certificateRegion, tagOwner, tagApplication } = config;
+const { certificateRegion, tagOwner, tagApplication, secondaryCertificateRegions } = config;
 
-const acm = new ACMClient({ region: certificateRegion });
-
-const readCertificate = async (arn) => {
-  const { Certificate: certificate } = await acm.send(
+const readCertificate = async (client, arn) => {
+  const { Certificate: certificate } = await client.send(
     new GetCertificateCommand({ CertificateArn: arn }),
   );
   return certificate;
 };
 
-const getCertificateDirectory = async (arn) => {
-  const { Tags: tags } = await acm.send(new ListTagsForCertificateCommand({ CertificateArn: arn }));
+const getCertificateDirectory = async (client, arn) => {
+  const { Tags: tags } = await client.send(
+    new ListTagsForCertificateCommand({ CertificateArn: arn }),
+  );
   const tag = tags.find((t) => {
     const { Key: key } = t;
     return key === 'directory';
@@ -37,8 +37,9 @@ const getCertificateDirectory = async (arn) => {
 
 export const getCertificate = async (arn) => {
   try {
-    const certificate = await readCertificate(arn);
-    const directory = await getCertificateDirectory(arn);
+    const client = new ACMClient({ region: certificateRegion });
+    const certificate = await readCertificate(client, arn);
+    const directory = await getCertificateDirectory(client, arn);
 
     return { certificate, directory };
   } catch (e) {
@@ -49,9 +50,10 @@ export const getCertificate = async (arn) => {
   }
 };
 
-export const findCertificate = async (commonName) => {
+export const findCertificate = async (commonName, client) => {
+  const acmClient = client || new ACMClient({ region: certificateRegion });
   const paginatorConfig = {
-    client: acm,
+    client: acmClient,
     pageSize: 25,
   };
 
@@ -66,7 +68,7 @@ export const findCertificate = async (commonName) => {
       const certificateDetails = await Promise.all(
         certificates.map(async (c) => {
           const { CertificateArn } = c;
-          const details = await acm.send(new DescribeCertificateCommand({ CertificateArn }));
+          const details = await acmClient.send(new DescribeCertificateCommand({ CertificateArn }));
           return details;
         }),
       );
@@ -97,37 +99,39 @@ export const importCertificate = async (
   fullCertificate,
   commonName,
   directory,
-  existingCertificate,
 ) => {
-  // const existingCertificate = await findCertificate(commonName);
-
-  let existingCertificateArn = null;
-  if (existingCertificate) {
-    const { CertificateArn } = existingCertificate;
-    existingCertificateArn = CertificateArn;
-  }
-
-  const [certificate, ...rest] = acme.forge.splitPemChain(fullCertificate);
-
-  const params = existingCertificateArn
-    ? {
-        CertificateArn: existingCertificateArn,
-        Certificate: Buffer.from(certificate),
-        CertificateChain: Buffer.from(rest.join()),
-        PrivateKey: Buffer.from(certificatePrivateKey),
+  const regions = [certificateRegion, ...secondaryCertificateRegions];
+  await Promise.all(
+    regions.map(async (region) => {
+      const client = new ACMClient({ region });
+      const existingCertificate = await findCertificate(commonName, client);
+      let existingCertificateArn = null;
+      if (existingCertificate) {
+        const { CertificateArn } = existingCertificate;
+        existingCertificateArn = CertificateArn;
       }
-    : {
-        Certificate: Buffer.from(certificate),
-        CertificateChain: Buffer.from(rest.join()),
-        PrivateKey: Buffer.from(certificatePrivateKey),
-        Tags: [
-          { Key: 'application', Value: tagApplication },
-          { Key: 'owner', Value: tagOwner },
-          { Key: 'directory', Value: directory },
-        ],
-      };
-  const { CertificateArn } = await acm.send(new ImportCertificateCommand(params));
-  logger.info(
-    `Certificate ${CertificateArn} for common name '${commonName}' imported in region ${certificateRegion}.`,
+      const [certificate, ...rest] = acme.forge.splitPemChain(fullCertificate);
+      const params = existingCertificateArn
+        ? {
+            CertificateArn: existingCertificateArn,
+            Certificate: Buffer.from(certificate),
+            CertificateChain: Buffer.from(rest.join()),
+            PrivateKey: Buffer.from(certificatePrivateKey),
+          }
+        : {
+            Certificate: Buffer.from(certificate),
+            CertificateChain: Buffer.from(rest.join()),
+            PrivateKey: Buffer.from(certificatePrivateKey),
+            Tags: [
+              { Key: 'application', Value: tagApplication },
+              { Key: 'owner', Value: tagOwner },
+              { Key: 'directory', Value: directory },
+            ],
+          };
+      const { CertificateArn } = await client.send(new ImportCertificateCommand(params));
+      logger.info(
+        `Certificate ${CertificateArn} for common name '${commonName}' imported in region ${certificateRegion}.`,
+      );
+    }),
   );
 };

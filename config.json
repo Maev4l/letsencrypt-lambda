@@ -2,6 +2,7 @@
   "route53DomainName": "isnan.eu",
   "certificateCommonName": "*.isnan.eu",
   "certificateRegion": "us-east-1",
+  "secondaryCertificateRegions": ["eu-central-1"],
   "region": "eu-central-1",
   "tagApplication": "letsencrypt-lambda",
   "tagOwner": "serverless",

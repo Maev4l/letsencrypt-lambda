@@ -98,7 +98,6 @@ export const renewCertificates = async (event) => {
           fullCertificate,
           certificateCommonName,
           directory,
-          existingCertificate,
         );
         logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${directory}).`);
       } catch (e) {
