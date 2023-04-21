@@ -1,4 +1,5 @@
 service: letsencrypt-lambda
+variablesResolutionMode: 20210326 # Enable serverless v3 variable resolution
 
 plugins:
   - serverless-webpack
@@ -27,6 +28,8 @@ provider:
   profile: serverless-admin-profile
   iam:
     role: MyRole
+  environment:
+    SLACK_TOKEN: ${ssm(raw):slack.certificate-renewal.token}
   tags:
     application: ${self:custom.config.tagApplication}
     owner: ${self:custom.config.tagOwner}
@@ -123,9 +126,9 @@ resources:
                   Resource: '*'
         Tags:
           - Key: application
-            Value: jenkins
+            Value: ${self:custom.config.tagApplication}
           - Key: owner
-            Value: serverless
+            Value: ${self:custom.config.tagOwner}
     LetsEncryptChallengeRecord:
       Type: AWS::Route53::RecordSet
       Properties:

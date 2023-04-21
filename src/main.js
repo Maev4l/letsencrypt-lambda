@@ -1,5 +1,4 @@
 import acme from 'acme-client';
-
 import moment from 'moment';
 
 import { getLogger } from './logger';
@@ -7,6 +6,7 @@ import config from '../config.json';
 import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey, saveFullCertificate } from './s3';
 import { getZoneId, createRoute53AcmeRecords } from './route53';
+import { notify } from './slack';
 
 const logger = getLogger('handler');
 
@@ -99,9 +99,16 @@ export const renewCertificates = async (event) => {
           certificateCommonName,
           directory,
         );
-        logger.info(`Certificate renewed/created (domain: '${route53DomainName}') (${directory}).`);
+        const successMessage = `Certificate renewed/created (domain: '${route53DomainName}') (${directory}).`;
+        logger.info(successMessage);
+
+        // Send to Slack
+        await notify(successMessage);
       } catch (e) {
-        logger.error(`Failed to renew certificate: ${e.toString()}.`);
+        const failureMessage = `Failed to renew certificate: ${e.toString()}.`;
+        logger.error(failureMessage);
+        // Send to Slack
+        await notify(failureMessage);
       }
     } else {
       logger.error(`No Zone ID for domain '${route53DomainName}.`);
