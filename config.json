@@ -8,5 +8,6 @@
   "tagOwner": "serverless",
   "bucketName": "letsencrypt-lambda-storage",
   "directory": "production",
-  "s3LetsEncryptAccountKeyName": "account-key"
+  "s3LetsEncryptAccountKeyName": "account-key",
+  "topicArn": "arn:aws:sns:eu-central-1:671123374425:alerting-events"
 }

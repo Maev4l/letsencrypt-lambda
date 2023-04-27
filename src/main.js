@@ -6,7 +6,7 @@ import config from '../config.json';
 import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey, saveFullCertificate } from './s3';
 import { getZoneId, createRoute53AcmeRecords } from './route53';
-import { notify } from './slack';
+import { notify } from './sns';
 
 const logger = getLogger('handler');
 
@@ -77,15 +77,14 @@ export const renewCertificates = async (event) => {
           challengeCreateFn: async (authz, challenge, keyAuthorization) => {
             await createRoute53AcmeRecords(zoneId, route53DomainName, keyAuthorization);
           },
-          /* Do not remove record, as DNS propagation may take some time, just update the DNS record
-           challengeRemoveFn: async () => {
-            try {
-              await resetRoute53AcmeRecords(zoneId, route53DomainName);
-            } catch (e) {
-              logger.warn(`Failed to remove challenge: ${e.toString()}.`);
-            }
-          },
-          */
+          // Do not remove record, as DNS propagation may take some time, just update the DNS record
+          // challengeRemoveFn: async () => {
+          //   try {
+          //     await resetRoute53AcmeRecords(zoneId, route53DomainName);
+          //   } catch (e) {
+          //     logger.warn(`Failed to remove challenge: ${e.toString()}.`);
+          //   }
+          // },
         });
 
         logger.info(`Account url: ${client.getAccountUrl()}`);

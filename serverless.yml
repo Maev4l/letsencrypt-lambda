@@ -17,6 +17,7 @@ custom:
     domainName: ${file(./config.json):route53DomainName}
     tagApplication: ${file(./config.json):tagApplication}
     tagOwner: ${file(./config.json):tagOwner}
+    topicArn: ${file(./config.json):topicArn}
 
 provider:
   name: aws
@@ -28,8 +29,6 @@ provider:
   profile: serverless-admin-profile
   iam:
     role: MyRole
-  environment:
-    SLACK_TOKEN: ${ssm(raw):slack.certificate-renewal.token}
   tags:
     application: ${self:custom.config.tagApplication}
     owner: ${self:custom.config.tagOwner}
@@ -72,6 +71,10 @@ resources:
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
+                - Effect: Allow # Allow slack notification via the alerter topic
+                  Action:
+                    - sns:Publish
+                  Resource: ${self:custom.config.topicArn}
                 - Effect: Allow # note that these rights are given in the default policy and are required if you want logs out of your lambda(s)
                   Action:
                     - logs:CreateLogGroup
