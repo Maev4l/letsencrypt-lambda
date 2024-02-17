@@ -34,7 +34,7 @@ export const loadAccountKey = async () => {
   } catch (e) {
     if (e.name === 'NoSuchKey') {
       logger.info(`Account Key not found.`);
-      const privateKey = await acme.forge.createPrivateKey();
+      const privateKey = await acme.crypto.createPrivateKey();
       logger.info(`Account Key generated.`);
       await s3.send(
         new PutObjectCommand({
@@ -68,7 +68,7 @@ const saveObject = async (name, content) =>
   });
 
 export const saveFullCertificate = async (fullCertificate, certificatePrivateKey) => {
-  const [certificate, intermediate, root] = acme.forge.splitPemChain(fullCertificate);
+  const [certificate, intermediate, root] = acme.crypto.splitPemChain(fullCertificate);
   await Promise.all([
     saveObject('full', fullCertificate),
     saveObject('certificate', certificate),

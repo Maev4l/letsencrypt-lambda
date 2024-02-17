@@ -1,6 +1,16 @@
 {
-  "route53DomainName": "isnan.eu",
-  "certificateCommonName": "*.isnan.eu",
+  "domain": {
+    "hostedZoneName": "isnan.eu",
+    "certificateCommonName": "*.isnan.eu",
+    "hostedZoneId": "ZWC66FN0XU6P9"
+  },
+  "subDomains": [
+    {
+      "hostedZoneName": "alexandria.isnan.eu",
+      "certificateAlternativeName": "*.alexandria.isnan.eu",
+      "hostedZoneId": "Z01675541IL7TQ00IT9PU"
+    }
+  ],
   "certificateRegion": "us-east-1",
   "secondaryCertificateRegions": ["eu-central-1"],
   "region": "eu-central-1",

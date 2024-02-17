@@ -5,7 +5,7 @@ import { getLogger } from './logger';
 import config from '../config.json';
 import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey, saveFullCertificate } from './s3';
-import { getZoneId, createRoute53AcmeRecords } from './route53';
+import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
 
 const logger = getLogger('handler');
@@ -14,12 +14,18 @@ export const renewCertificates = async (event) => {
   // Merge configuration and invokation parameters
   const params = { ...config, ...event };
 
-  const { directory, force, route53DomainName, certificateCommonName } = params;
+  const { domain, subDomains, directory, force } = params;
+
+  const {
+    certificateCommonName,
+    hostedZoneName: domainZoneName,
+    hostedZoneId: domainZoneId,
+  } = domain;
 
   logger.info(
     `Certificate renewal (force: ${
       force ? 'yes' : 'no'
-    }) (domain: '${route53DomainName}' - common name: '${certificateCommonName}') (${directory}) started ...`,
+    }) (domain: '${domainZoneName}' - common name: '${certificateCommonName}') (${directory}) started ...`,
   );
 
   let requestCertificate = false;
@@ -46,71 +52,75 @@ export const renewCertificates = async (event) => {
 
   if (requestCertificate || force) {
     const accountKey = await loadAccountKey();
+    const altNames = subDomains.map((s) => {
+      const { certificateAlternativeName } = s;
+      return certificateAlternativeName;
+    });
 
-    const [certificatePrivateKey, certificateCsr] = await acme.forge.createCsr({
-      commonName: certificateCommonName,
+    const [certificatePrivateKey, certificateCsr] = await acme.crypto.createCsr({
+      commonName: domain.certificateCommonName,
+      altNames,
     });
 
     logger.info(`Certificate Signing Request generated.`);
 
-    const zoneId = await getZoneId(route53DomainName);
-    if (zoneId) {
-      logger.info(`Zone ID found for domain '${route53DomainName}': ${zoneId}.`);
+    const directoryUrl =
+      directory === 'production'
+        ? acme.directory.letsencrypt.production
+        : acme.directory.letsencrypt.staging;
 
-      const directoryUrl =
-        directory === 'production'
-          ? acme.directory.letsencrypt.production
-          : acme.directory.letsencrypt.staging;
+    const client = new acme.Client({
+      directoryUrl,
+      accountKey,
+      backoffAttempts: 20,
+    });
 
-      const client = new acme.Client({
-        directoryUrl,
-        accountKey,
-        backoffAttempts: 20,
+    try {
+      const fullCertificate = await client.auto({
+        csr: certificateCsr,
+        email: 'maeval.nightingale@gmail.com',
+        termsOfServiceAgreed: true,
+        challengePriority: ['dns-01'],
+        challengeCreateFn: async (authz, challenge, keyAuthorization) => {
+          await createRoute53AcmeRecords(domainZoneId, domainZoneName, keyAuthorization);
+          await Promise.all(
+            subDomains.map(async (s) => {
+              const { hostedZoneId, hostedZoneName } = s;
+              await createRoute53AcmeRecords(hostedZoneId, hostedZoneName, keyAuthorization);
+            }),
+          );
+        },
+        // Do not remove record, as DNS propagation may take some time, just update the DNS record
+        // challengeRemoveFn: async () => {
+        //   try {
+        //     await resetRoute53AcmeRecords(zoneId, route53DomainName);
+        //   } catch (e) {
+        //     logger.warn(`Failed to remove challenge: ${e.toString()}.`);
+        //   }
+        // },
       });
 
-      try {
-        const fullCertificate = await client.auto({
-          csr: certificateCsr,
-          email: 'maeval.nightingale@gmail.com',
-          termsOfServiceAgreed: true,
-          challengePriority: ['dns-01'],
-          challengeCreateFn: async (authz, challenge, keyAuthorization) => {
-            await createRoute53AcmeRecords(zoneId, route53DomainName, keyAuthorization);
-          },
-          // Do not remove record, as DNS propagation may take some time, just update the DNS record
-          // challengeRemoveFn: async () => {
-          //   try {
-          //     await resetRoute53AcmeRecords(zoneId, route53DomainName);
-          //   } catch (e) {
-          //     logger.warn(`Failed to remove challenge: ${e.toString()}.`);
-          //   }
-          // },
-        });
+      logger.info(`Account url: ${client.getAccountUrl()}`);
 
-        logger.info(`Account url: ${client.getAccountUrl()}`);
+      await saveFullCertificate(fullCertificate, certificatePrivateKey);
+      logger.info(`Certificate saved (domain: '${domainZoneName}') (${directory}).`);
 
-        await saveFullCertificate(fullCertificate, certificatePrivateKey);
-        logger.info(`Certificate saved (domain: '${route53DomainName}') (${directory}).`);
+      await importCertificate(
+        certificatePrivateKey,
+        fullCertificate,
+        certificateCommonName,
+        directory,
+      );
+      const successMessage = `Certificate renewed/created (domain: '${domainZoneName}') (${directory}).`;
+      logger.info(successMessage);
 
-        await importCertificate(
-          certificatePrivateKey,
-          fullCertificate,
-          certificateCommonName,
-          directory,
-        );
-        const successMessage = `Certificate renewed/created (domain: '${route53DomainName}') (${directory}).`;
-        logger.info(successMessage);
-
-        // Send to Slack
-        await notify(successMessage);
-      } catch (e) {
-        const failureMessage = `Failed to renew certificate: ${e.toString()}.`;
-        logger.error(failureMessage);
-        // Send to Slack
-        await notify(failureMessage);
-      }
-    } else {
-      logger.error(`No Zone ID for domain '${route53DomainName}.`);
+      // Send to Slack
+      await notify(successMessage);
+    } catch (e) {
+      const failureMessage = `Failed to renew certificate: ${e.toString()}.`;
+      logger.error(failureMessage);
+      // Send to Slack
+      await notify(failureMessage);
     }
   } else {
     logger.info('No need for certificate renewal.');

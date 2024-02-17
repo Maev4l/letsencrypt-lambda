@@ -110,7 +110,7 @@ export const importCertificate = async (
         const { CertificateArn } = existingCertificate;
         existingCertificateArn = CertificateArn;
       }
-      const [certificate, ...rest] = acme.forge.splitPemChain(fullCertificate);
+      const [certificate, ...rest] = acme.crypto.splitPemChain(fullCertificate);
       const params = existingCertificateArn
         ? {
             CertificateArn: existingCertificateArn,

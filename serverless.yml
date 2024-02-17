@@ -13,19 +13,21 @@ custom:
   config:
     bucketName: ${file(./config.json):bucketName}
     region: ${file(./config.json):region}
-    domainName: ${file(./config.json):route53DomainName}
+    domainName: ${file(./config.json):domain.hostedZoneName}
     tagApplication: ${file(./config.json):tagApplication}
     tagOwner: ${file(./config.json):tagOwner}
     topicArn: ${file(./config.json):topicArn}
 
 provider:
   name: aws
+  architecture: arm64
+  deploymentMethod: direct
   runtime: nodejs18.x
   versionFunctions: false
   memorySize: 512
   logRetentionInDays: 30
   region: ${self:custom.config.region}
-  profile: serverless-admin-profile
+  profile: default
   iam:
     role: MyRole
   tags:

@@ -2,7 +2,6 @@ import {
   Route53Client,
   ListResourceRecordSetsCommand,
   ChangeResourceRecordSetsCommand,
-  paginateListHostedZones,
 } from '@aws-sdk/client-route-53';
 
 import { getLogger } from './logger';
@@ -110,28 +109,7 @@ export const createRoute53AcmeRecords = async (zoneId, domain, challengeText) =>
     }),
   );
 
-  logger.info(`Create verification record '${acmeName}' in domain '${domain}'.`);
-};
-
-export const getZoneId = async (domain) => {
-  const zoneName = domain.endsWith('.') ? domain : `${domain}.`;
-
-  const paginatorConfig = {
-    client: r53,
-    pageSize: 25,
-  };
-
-  for await (const page of paginateListHostedZones(paginatorConfig, {})) {
-    const { HostedZones: zones } = page;
-    const zone = zones.find((z) => {
-      const { Name: name } = z;
-      return name === zoneName;
-    });
-    if (zone) {
-      const { Id: zoneId } = zone;
-      return zoneId.replace('/hostedzone/', '');
-    }
-  }
-
-  return null;
+  logger.info(
+    `Create verification record '${acmeName}' in domain '${domain}' - challenge: ${challengeText}`,
+  );
 };
