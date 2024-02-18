@@ -52,6 +52,13 @@ export const renewCertificates = async (event) => {
 
   if (requestCertificate || force) {
     const accountKey = await loadAccountKey();
+    /*
+    {
+      "hostedZoneName": "alexandria.isnan.eu",
+      "certificateAlternativeName": "*.alexandria.isnan.eu",
+      "hostedZoneId": "Z01675541IL7TQ00IT9PU"
+    }
+    */
     const altNames = subDomains.map((s) => {
       const { certificateAlternativeName } = s;
       return certificateAlternativeName;
