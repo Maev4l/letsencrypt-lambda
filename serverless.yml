@@ -22,7 +22,7 @@ provider:
   name: aws
   architecture: arm64
   deploymentMethod: direct
-  runtime: nodejs18.x
+  runtime: nodejs20.x
   versionFunctions: false
   memorySize: 512
   logRetentionInDays: 30
