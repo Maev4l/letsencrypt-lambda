@@ -1,15 +1,19 @@
 service: letsencrypt-lambda
 
-plugins:
-  - serverless-webpack
+build:
+  esbuild:
+    bundle: true
+    minify: true
 
+#plugins:
+#  - serverless-webpack
 custom:
-  webpack:
-    webpackConfig: './webpack.config.js'
-    includeModules:
-      forceExclude:
-        - aws-sdk
-    packager: 'yarn'
+  #  webpack:
+  #    webpackConfig: './webpack.config.js'
+  #    includeModules:
+  #      forceExclude:
+  #        - aws-sdk
+  #    packager: 'yarn'
   config:
     bucketName: ${file(./config.json):bucketName}
     region: ${file(./config.json):region}
@@ -22,7 +26,7 @@ provider:
   name: aws
   architecture: arm64
   deploymentMethod: direct
-  runtime: nodejs20.x
+  runtime: nodejs22.x
   versionFunctions: false
   memorySize: 512
   logRetentionInDays: 30

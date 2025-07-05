@@ -2,7 +2,7 @@
   "name": "letsencrypt-lambda",
   "version": "1.0.0",
   "scripts": {
-    "build": "serverless webpack --config serverless.yml",
+    "build": "serverless package --config serverless.yml",
     "deploy": "serverless deploy",
     "renew-production": "serverless invoke --function renewCertificates",
     "renew-production-force": "serverless invoke --function renewCertificates --data='{\"force\":true}'",
@@ -28,9 +28,6 @@
     "eslint-config-prettier": "8.3.0",
     "eslint-plugin-import": "2.22.1",
     "prettier": "2.2.1",
-    "serverless": "3.38.0",
-    "serverless-webpack": "5.11.0",
-    "webpack": "5.82.0",
-    "webpack-node-externals": "3.0.0"
+    "serverless": "4.17.1"
   }
 }
