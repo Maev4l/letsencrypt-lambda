@@ -8,13 +8,21 @@ import {
   ListTagsForCertificateCommand,
 } from '@aws-sdk/client-acm';
 
-import config from '../config.json';
-
 import { getLogger } from './logger';
 
 const logger = getLogger('acm');
 
-const { certificateRegion, tagOwner, tagApplication, secondaryCertificateRegions } = config;
+const {
+  CERTIFICATE_REGION: certificateRegion,
+  // Comma-separated list of regions, e.g.: "eu-central-1,us-west-2,ap-southeast-1"
+  SECONDARY_CERTIFICATE_REGIONS: secondaryCertificateRegionsEnv,
+  TAG_OWNER: tagOwner,
+  TAG_APPLICATION: tagApplication,
+} = process.env;
+
+const secondaryCertificateRegions = secondaryCertificateRegionsEnv
+  ? secondaryCertificateRegionsEnv.split(',').map((r) => r.trim())
+  : [];
 
 const readCertificate = async (client, arn) => {
   const { Certificate: certificate } = await client.send(
@@ -130,7 +138,7 @@ export const importCertificate = async (
           };
       const { CertificateArn } = await client.send(new ImportCertificateCommand(params));
       logger.info(
-        `Certificate ${CertificateArn} for common name '${commonName}' imported in region ${certificateRegion}.`,
+        `Certificate ${CertificateArn} for common name '${commonName}' imported in region ${region}.`,
       );
     }),
   );

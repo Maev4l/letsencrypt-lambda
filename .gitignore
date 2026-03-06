@@ -2,8 +2,6 @@
 node_modules
 jspm_packages
 
-# Serverless directories
-.serverless
 
 # Coveralls
 coverage
@@ -11,14 +9,15 @@ coverage
 # Editor
 .vscode
 
-# nyc
-.nyc_output
 
-# Secrets
-secrets.txt
 
-# Terraform infra
-infra.json
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+.terraform.lock.hcl
 
-# serverless webpack
-.webpack/
+# Lambda package
+dist/
+bin/

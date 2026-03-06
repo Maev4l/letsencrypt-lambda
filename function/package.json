@@ -1,0 +1,28 @@
+{
+  "name": "letsencrypt-lambda",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf bin",
+    "build": "yarn clean && mkdir -p bin && node esbuild.config.mjs",
+    "package": "cd bin && zip -r ../dist/lambda.zip .",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "renew": "aws lambda invoke --function-name renew-certificates /dev/stdout 2>/dev/null",
+    "renew:force": "aws lambda invoke --function-name renew-certificates --cli-binary-format raw-in-base64-out --payload '{\"force\":true}' /dev/stdout 2>/dev/null"
+  },
+  "dependencies": {
+    "acme-client": "5.3.0",
+    "moment": "2.29.1",
+    "winston": "3.3.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.21.0",
+    "esbuild": "0.24.2",
+    "eslint": "9.21.0",
+    "eslint-config-prettier": "10.0.1",
+    "eslint-plugin-import": "2.31.0",
+    "globals": "15.15.0",
+    "prettier": "3.4.2"
+  }
+}

@@ -2,9 +2,8 @@ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
 import { getLogger } from './logger';
 
-import config from '../config.json';
+const { REGION: region, TOPIC_ARN: topicArn } = process.env;
 
-const { region, topicArn } = config;
 const sns = new SNSClient({ region });
 
 const logger = getLogger('sns');

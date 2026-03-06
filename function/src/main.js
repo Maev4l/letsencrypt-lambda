@@ -2,7 +2,6 @@ import acme from 'acme-client';
 import moment from 'moment';
 
 import { getLogger } from './logger';
-import config from '../config.json';
 import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey, saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
@@ -10,17 +9,15 @@ import { notify } from './sns';
 
 const logger = getLogger('handler');
 
+const {
+  DOMAIN_HOSTED_ZONE_NAME: domainZoneName,
+  DOMAIN_CERTIFICATE_COMMON_NAME: certificateCommonName,
+  DOMAIN_HOSTED_ZONE_ID: domainZoneId,
+  DIRECTORY: defaultDirectory,
+} = process.env;
+
 export const renewCertificates = async (event) => {
-  // Merge configuration and invokation parameters
-  const params = { ...config, ...event };
-
-  const { domain, subDomains, directory, force } = params;
-
-  const {
-    certificateCommonName,
-    hostedZoneName: domainZoneName,
-    hostedZoneId: domainZoneId,
-  } = domain;
+  const { directory = defaultDirectory, force } = event || {};
 
   logger.info(
     `Certificate renewal (force: ${
@@ -52,21 +49,9 @@ export const renewCertificates = async (event) => {
 
   if (requestCertificate || force) {
     const accountKey = await loadAccountKey();
-    /*
-    {
-      "hostedZoneName": "alexandria.isnan.eu",
-      "certificateAlternativeName": "*.alexandria.isnan.eu",
-      "hostedZoneId": "Z01675541IL7TQ00IT9PU"
-    }
-    */
-    const altNames = subDomains.map((s) => {
-      const { certificateAlternativeName } = s;
-      return certificateAlternativeName;
-    });
 
     const [certificatePrivateKey, certificateCsr] = await acme.crypto.createCsr({
-      commonName: domain.certificateCommonName,
-      altNames,
+      commonName: certificateCommonName,
     });
 
     logger.info(`Certificate Signing Request generated.`);
@@ -90,21 +75,7 @@ export const renewCertificates = async (event) => {
         challengePriority: ['dns-01'],
         challengeCreateFn: async (authz, challenge, keyAuthorization) => {
           await createRoute53AcmeRecords(domainZoneId, domainZoneName, keyAuthorization);
-          await Promise.all(
-            subDomains.map(async (s) => {
-              const { hostedZoneId, hostedZoneName } = s;
-              await createRoute53AcmeRecords(hostedZoneId, hostedZoneName, keyAuthorization);
-            }),
-          );
         },
-        // Do not remove record, as DNS propagation may take some time, just update the DNS record
-        // challengeRemoveFn: async () => {
-        //   try {
-        //     await resetRoute53AcmeRecords(zoneId, route53DomainName);
-        //   } catch (e) {
-        //     logger.warn(`Failed to remove challenge: ${e.toString()}.`);
-        //   }
-        // },
       });
 
       logger.info(`Account url: ${client.getAccountUrl()}`);
@@ -121,12 +92,10 @@ export const renewCertificates = async (event) => {
       const successMessage = `Certificate renewed/created (domain: '${domainZoneName}') (${directory}).`;
       logger.info(successMessage);
 
-      // Send to Slack
       await notify(successMessage);
     } catch (e) {
       const failureMessage = `Failed to renew certificate: ${e.toString()}.`;
       logger.error(failureMessage);
-      // Send to Slack
       await notify(failureMessage);
     }
   } else {

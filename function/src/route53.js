@@ -5,9 +5,8 @@ import {
 } from '@aws-sdk/client-route-53';
 
 import { getLogger } from './logger';
-import config from '../config.json';
 
-const { region } = config;
+const { REGION: region } = process.env;
 
 const logger = getLogger('route53');
 

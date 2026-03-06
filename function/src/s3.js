@@ -1,11 +1,15 @@
 import acme from 'acme-client';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
-import config from '../config.json';
-
 import { getLogger } from './logger';
 
-const { region, bucketName, tagApplication, tagOwner, s3LetsEncryptAccountKeyName } = config;
+const {
+  REGION: region,
+  BUCKET_NAME: bucketName,
+  TAG_APPLICATION: tagApplication,
+  TAG_OWNER: tagOwner,
+  S3_LETSENCRYPT_ACCOUNT_KEY_NAME: s3LetsEncryptAccountKeyName,
+} = process.env;
 
 const logger = getLogger('s3');
 
