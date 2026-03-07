@@ -15,15 +15,6 @@ const logger = getLogger('s3');
 
 const s3 = new S3Client({ region });
 
-const streamToBuffer = (stream) => {
-  const chunks = [];
-  return new Promise((resolve, reject) => {
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on('error', (err) => reject(err));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-  });
-};
-
 export const loadAccountKey = async () => {
   try {
     const { Body: body } = await s3.send(
@@ -33,8 +24,8 @@ export const loadAccountKey = async () => {
       }),
     );
     logger.info(`Account Key loaded.`);
-    const accountKey = await streamToBuffer(body);
-    return accountKey;
+    const accountKey = await body.transformToByteArray();
+    return Buffer.from(accountKey);
   } catch (e) {
     if (e.name === 'NoSuchKey') {
       logger.info(`Account Key not found.`);
@@ -58,18 +49,17 @@ export const loadAccountKey = async () => {
   }
 };
 
-const saveObject = async (name, content) =>
-  new Promise((resolve) => {
-    s3.send(
-      new PutObjectCommand({
-        Bucket: bucketName,
-        Key: name,
-        Body: content,
-        ServerSideEncryption: 'AES256',
-        Tagging: `application=${tagApplication}&owner=${tagOwner}`,
-      }),
-    ).then(() => resolve());
-  });
+const saveObject = async (name, content) => {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucketName,
+      Key: name,
+      Body: content,
+      ServerSideEncryption: 'AES256',
+      Tagging: `application=${tagApplication}&owner=${tagOwner}`,
+    }),
+  );
+};
 
 export const saveFullCertificate = async (fullCertificate, certificatePrivateKey) => {
   const [certificate, intermediate, root] = acme.crypto.splitPemChain(fullCertificate);

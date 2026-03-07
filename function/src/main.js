@@ -1,5 +1,5 @@
 import acme from 'acme-client';
-import moment from 'moment';
+import dayjs from 'dayjs';
 
 import { getLogger } from './logger';
 import { importCertificate, findCertificate, getCertificate } from './acm';
@@ -14,7 +14,14 @@ const {
   DOMAIN_CERTIFICATE_COMMON_NAME: certificateCommonName,
   DOMAIN_HOSTED_ZONE_ID: domainZoneId,
   DIRECTORY: defaultDirectory,
+  ACME_EMAIL: acmeEmail,
 } = process.env;
+
+// Returns the Let's Encrypt directory URL based on environment
+const getDirectoryUrl = (directory) =>
+  directory === 'production'
+    ? acme.directory.letsencrypt.production
+    : acme.directory.letsencrypt.staging;
 
 export const renewCertificates = async (event) => {
   const { directory = defaultDirectory, force } = event || {};
@@ -33,7 +40,7 @@ export const renewCertificates = async (event) => {
   } else {
     const { NotAfter } = existingCertificate;
 
-    const diff = moment(NotAfter).diff(moment(), 'days');
+    const diff = dayjs(NotAfter).diff(dayjs(), 'day');
 
     if (diff >= 0) {
       logger.info(`Existing certificate will expire in ${diff} day(s).`);
@@ -56,97 +63,85 @@ export const renewCertificates = async (event) => {
 
     logger.info(`Certificate Signing Request generated.`);
 
-    const directoryUrl =
-      directory === 'production'
-        ? acme.directory.letsencrypt.production
-        : acme.directory.letsencrypt.staging;
-
     const client = new acme.Client({
-      directoryUrl,
+      directoryUrl: getDirectoryUrl(directory),
       accountKey,
       backoffAttempts: 20,
     });
 
-    try {
-      const fullCertificate = await client.auto({
-        csr: certificateCsr,
-        email: 'maeval.nightingale@gmail.com',
-        termsOfServiceAgreed: true,
-        challengePriority: ['dns-01'],
-        challengeCreateFn: async (authz, challenge, keyAuthorization) => {
-          await createRoute53AcmeRecords(domainZoneId, domainZoneName, keyAuthorization);
-        },
-      });
+    const fullCertificate = await client.auto({
+      csr: certificateCsr,
+      email: acmeEmail,
+      termsOfServiceAgreed: true,
+      challengePriority: ['dns-01'],
+      challengeCreateFn: async (authz, challenge, keyAuthorization) => {
+        await createRoute53AcmeRecords(domainZoneId, domainZoneName, keyAuthorization);
+      },
+    });
 
-      logger.info(`Account url: ${client.getAccountUrl()}`);
+    logger.info(`Account url: ${client.getAccountUrl()}`);
 
-      await saveFullCertificate(fullCertificate, certificatePrivateKey);
-      logger.info(`Certificate saved (domain: '${domainZoneName}') (${directory}).`);
+    await saveFullCertificate(fullCertificate, certificatePrivateKey);
+    logger.info(`Certificate saved (domain: '${domainZoneName}') (${directory}).`);
 
-      await importCertificate(
-        certificatePrivateKey,
-        fullCertificate,
-        certificateCommonName,
-        directory,
-      );
-      const successMessage = `Certificate renewed/created (domain: '${domainZoneName}') (${directory}).`;
-      logger.info(successMessage);
+    await importCertificate(
+      certificatePrivateKey,
+      fullCertificate,
+      certificateCommonName,
+      directory,
+    );
+    const successMessage = `Certificate renewed/created (domain: '${domainZoneName}') (${directory}).`;
+    logger.info(successMessage);
 
-      await notify(successMessage);
-    } catch (e) {
-      const failureMessage = `Failed to renew certificate: ${e.toString()}.`;
-      logger.error(failureMessage);
-      await notify(failureMessage);
-    }
-  } else {
-    logger.info('No need for certificate renewal.');
+    await notify(successMessage);
+
+    return { statusCode: 200, message: successMessage };
   }
+
+  return { statusCode: 200, message: 'No certificate renewal needed' };
 };
 
 export const revokeCertificate = async (event) => {
   const { arn, ...rest } = event;
 
-  if (arn) {
-    logger.info(`Revoking certificate (arn: ${arn})`);
-    try {
-      const accountKey = await loadAccountKey();
-
-      const result = await getCertificate(arn);
-      if (result) {
-        const { certificate, ...other } = result;
-        const { directory } = { ...other, ...rest };
-
-        logger.info(`Directory: ${directory}`);
-
-        const directoryUrl =
-          directory === 'production'
-            ? acme.directory.letsencrypt.production
-            : acme.directory.letsencrypt.staging;
-
-        const client = new acme.Client({
-          directoryUrl,
-          accountKey,
-        });
-
-        await client.createAccount({
-          email: 'maeval.nightingale@gmail.com',
-          termsOfServiceAgreed: true,
-        });
-
-        const accountUrl = client.getAccountUrl();
-        logger.info(`Account url: ${accountUrl}`);
-
-        const revokation = await client.revokeCertificate(certificate);
-        logger.info(
-          `Revoked (certificate: ${arn} - directory: ${directory}): ${JSON.stringify(revokation)}.`,
-        );
-      } else {
-        logger.error(`Certificate with ARN ${arn} does not exists.`);
-      }
-    } catch (e) {
-      logger.error(`Failed to revoke certificate (arn ${arn}): ${e.toString()}.`);
-    }
-  } else {
-    logger.info(`No ARN was specfified.`);
+  if (!arn) {
+    logger.info(`No ARN was specified.`);
+    return { statusCode: 400, message: 'No ARN was specified' };
   }
+
+  logger.info(`Revoking certificate (arn: ${arn})`);
+
+  const accountKey = await loadAccountKey();
+
+  const result = await getCertificate(arn);
+  if (!result) {
+    const message = `Certificate with ARN ${arn} does not exist.`;
+    logger.error(message);
+    return { statusCode: 404, message };
+  }
+
+  const { certificate, ...other } = result;
+  const { directory } = { ...other, ...rest };
+
+  logger.info(`Directory: ${directory}`);
+
+  const client = new acme.Client({
+    directoryUrl: getDirectoryUrl(directory),
+    accountKey,
+  });
+
+  await client.createAccount({
+    email: acmeEmail,
+    termsOfServiceAgreed: true,
+  });
+
+  const accountUrl = client.getAccountUrl();
+  logger.info(`Account url: ${accountUrl}`);
+
+  const revokation = await client.revokeCertificate(certificate);
+  logger.info(
+    `Revoked (certificate: ${arn} - directory: ${directory}): ${JSON.stringify(revokation)}.`,
+  );
+
+  return { statusCode: 200, message: `Certificate ${arn} revoked successfully` };
 };

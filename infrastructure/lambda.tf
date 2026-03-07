@@ -16,6 +16,7 @@ locals {
     TAG_APPLICATION                 = var.tag_application
     TAG_OWNER                       = var.tag_owner
     DIRECTORY                       = var.directory
+    ACME_EMAIL                      = "maeval.nightingale@gmail.com"
   }
 }
 
