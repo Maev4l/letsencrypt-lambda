@@ -22,13 +22,14 @@ locals {
 
 # Lambda function: renew certificates
 module "renew_certificates" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.5.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.6.0"
 
   function_name = "renew-certificates"
   zip = {
     filename = local.lambda_zip_path
     runtime  = "nodejs22.x"
     handler  = "main.renewCertificates"
+    hash     = filebase64sha256("../function/bin/main.js")
   }
   architecture           = "arm64"
   memory_size            = var.lambda_memory_size
@@ -40,13 +41,14 @@ module "renew_certificates" {
 
 # Lambda function: revoke certificate
 module "revoke_certificate" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.5.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.6.0"
 
   function_name = "revoke-certificate"
   zip = {
     filename = local.lambda_zip_path
     runtime  = "nodejs22.x"
     handler  = "main.revokeCertificate"
+    hash     = filebase64sha256("../function/bin/main.js")
   }
   architecture           = "arm64"
   memory_size            = var.lambda_memory_size
@@ -58,7 +60,7 @@ module "revoke_certificate" {
 
 # EventBridge Scheduler trigger for certificate renewal
 module "renew_certificates_scheduler" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.5.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.6.0"
 
   function_name       = module.renew_certificates.function_name
   function_arn        = module.renew_certificates.function_arn

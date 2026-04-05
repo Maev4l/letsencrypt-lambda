@@ -1,0 +1,10 @@
+{
+  "name": "certificate",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "infra:apply": "terraform -chdir=infrastructure apply -auto-approve",
+    "backend:build": "yarn --cwd function build",
+    "backend:deploy": "yarn --cwd function package && yarn infra:apply"
+  }
+}
