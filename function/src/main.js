@@ -98,7 +98,12 @@ export const renewCertificates = async (event) => {
     return { statusCode: 200, message: successMessage };
   }
 
-  return { statusCode: 200, message: 'No certificate renewal needed' };
+  // Notify even when no renewal needed, so we know the Lambda executed
+  const skipMessage = `Certificate check completed - no renewal needed. Certificate expires in ${dayjs(existingCertificate.NotAfter).diff(dayjs(), 'day')} day(s).`;
+  logger.info(skipMessage);
+  await notify(skipMessage);
+
+  return { statusCode: 200, message: skipMessage };
 };
 
 export const revokeCertificate = async (event) => {

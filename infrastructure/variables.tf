@@ -85,5 +85,5 @@ variable "lambda_timeout" {
 variable "schedule_rate" {
   description = "Schedule rate for certificate renewal"
   type        = string
-  default     = "rate(30 days)"
+  default     = "rate(7 days)"
 }
