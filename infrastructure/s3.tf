@@ -1,6 +1,8 @@
 # S3 bucket for Let's Encrypt certificate storage
 resource "aws_s3_bucket" "letsencrypt" {
   bucket = var.bucket_name
+  # Allow `terraform destroy` to remove the bucket even when objects remain.
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "letsencrypt" {
