@@ -48,6 +48,9 @@ export const renewCertificates = async (event) => {
       logger.info(`Existing certificate expired since ${Math.abs(diff)} day(s).`);
     }
 
+    // Scheduler runs weekly (rate(7 days), see infrastructure/lambda.tf).
+    // We renew when < 30 days remain, giving ~3 weeks of retry budget if a
+    // single run fails.
     if (diff < 30) {
       // Certificate will expire in less than 30 days
       requestCertificate = true;
