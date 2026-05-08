@@ -1,12 +1,17 @@
-# S3 bucket for Let's Encrypt certificate storage
-resource "aws_s3_bucket" "letsencrypt" {
-  bucket = var.bucket_name
-  # Allow `terraform destroy` to remove the bucket even when objects remain.
+locals {
+  # Union of all regions any domain has opted into for PEM storage.
+  pem_regions = toset(flatten([for d in var.domains : d.pem_storage_regions]))
+}
+
+# ---------- Account-key bucket (legacy global namespace, preserved) ----------
+
+resource "aws_s3_bucket" "account_key" {
+  bucket        = var.account_key_bucket
   force_destroy = true
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "letsencrypt" {
-  bucket = aws_s3_bucket.letsencrypt.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "account_key" {
+  bucket = aws_s3_bucket.account_key.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -15,8 +20,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "letsencrypt" {
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "letsencrypt" {
-  bucket = aws_s3_bucket.letsencrypt.id
+resource "aws_s3_bucket_public_access_block" "account_key" {
+  bucket = aws_s3_bucket.account_key.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -24,82 +29,50 @@ resource "aws_s3_bucket_public_access_block" "letsencrypt" {
   restrict_public_buckets = true
 }
 
-# Bucket policy enforcing encryption and secure transport
-resource "aws_s3_bucket_policy" "letsencrypt" {
-  bucket = aws_s3_bucket.letsencrypt.id
+resource "aws_s3_bucket_policy" "account_key" {
+  bucket = aws_s3_bucket.account_key.id
+  policy = templatefile("${path.module}/templates/bucket-security-policy.json.tpl", {
+    bucket_arn = aws_s3_bucket.account_key.arn
+  })
+}
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyPublishingUnencryptedResources"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.letsencrypt.arn}/*"
-        Condition = {
-          Null = {
-            "s3:x-amz-server-side-encryption" = "true"
-          }
-        }
-      },
-      {
-        Sid       = "DenyIncorrectEncryptionHeader"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.letsencrypt.arn}/*"
-        Condition = {
-          "ForAllValues:StringNotEquals" = {
-            "s3:x-amz-server-side-encryption" = ["AES256", "aws:kms"]
-          }
-        }
-      },
-      {
-        Sid       = "DenyUnencryptedConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = ["s3:GetObject", "s3:PutObject"]
-        Resource  = "${aws_s3_bucket.letsencrypt.arn}/*"
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      },
-      {
-        Sid       = "DenyPublicReadAcl"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = ["s3:PutBucketAcl", "s3:PutObject", "s3:PutObjectAcl"]
-        Resource = [
-          aws_s3_bucket.letsencrypt.arn,
-          "${aws_s3_bucket.letsencrypt.arn}/*"
-        ]
-        Condition = {
-          StringEquals = {
-            "s3:x-amz-acl" = ["authenticated-read", "public-read", "public-read-write"]
-          }
-        }
-      },
-      {
-        Sid       = "DenyGrantingPublicRead"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = ["s3:PutBucketAcl", "s3:PutObject", "s3:PutObjectAcl"]
-        Resource = [
-          aws_s3_bucket.letsencrypt.arn,
-          "${aws_s3_bucket.letsencrypt.arn}/*"
-        ]
-        Condition = {
-          StringLike = {
-            "s3:x-amz-grant-read" = [
-              "*http://acs.amazonaws.com/groups/global/AllUsers*",
-              "*http://acs.amazonaws.com/groups/global/AuthenticatedUsers*"
-            ]
-          }
-        }
-      }
-    ]
+# ---------- PEM buckets (per-region, account-regional namespace) ----------
+
+resource "aws_s3_bucket" "pem" {
+  for_each         = local.pem_regions
+  bucket           = "${var.pem_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${each.value}-an"
+  bucket_namespace = "account-regional"
+  region           = each.value
+  force_destroy    = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "pem" {
+  for_each = local.pem_regions
+  bucket   = aws_s3_bucket.pem[each.value].id
+  region   = each.value
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "pem" {
+  for_each                = local.pem_regions
+  bucket                  = aws_s3_bucket.pem[each.value].id
+  region                  = each.value
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "pem" {
+  for_each = local.pem_regions
+  bucket   = aws_s3_bucket.pem[each.value].id
+  region   = each.value
+  policy = templatefile("${path.module}/templates/bucket-security-policy.json.tpl", {
+    bucket_arn = aws_s3_bucket.pem[each.value].arn
   })
 }

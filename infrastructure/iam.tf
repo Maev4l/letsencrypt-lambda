@@ -9,26 +9,33 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   statement {
-    sid    = "S3Read"
+    sid    = "S3AccountKey"
     effect = "Allow"
     actions = [
       "s3:GetObject",
+      "s3:PutObject",
+      "s3:PutObjectTagging",
       "s3:ListBucket",
     ]
     resources = [
-      aws_s3_bucket.letsencrypt.arn,
-      "${aws_s3_bucket.letsencrypt.arn}/*",
+      aws_s3_bucket.account_key.arn,
+      "${aws_s3_bucket.account_key.arn}/*",
     ]
   }
 
-  statement {
-    sid    = "S3Write"
-    effect = "Allow"
-    actions = [
-      "s3:PutObject",
-      "s3:PutObjectTagging",
-    ]
-    resources = ["${aws_s3_bucket.letsencrypt.arn}/*"]
+  # PEM buckets — write only. Emitted only when at least one domain has
+  # pem_storage_regions populated (otherwise IAM rejects `resources = []`).
+  dynamic "statement" {
+    for_each = length(local.pem_regions) > 0 ? [1] : []
+    content {
+      sid    = "S3PemWrite"
+      effect = "Allow"
+      actions = [
+        "s3:PutObject",
+        "s3:PutObjectTagging",
+      ]
+      resources = [for b in aws_s3_bucket.pem : "${b.arn}/*"]
+    }
   }
 
   statement {

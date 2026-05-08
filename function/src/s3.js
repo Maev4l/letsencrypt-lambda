@@ -5,22 +5,30 @@ import { getLogger } from './logger';
 
 const {
   REGION: region,
-  BUCKET_NAME: bucketName,
+  ACCOUNT_KEY_BUCKET: accountKeyBucket,
+  ACCOUNT_KEY_NAME: accountKeyName,
+  PEM_BUCKET_PREFIX: pemBucketPrefix,
+  AWS_ACCOUNT_ID: awsAccountId,
   TAG_APPLICATION: tagApplication,
   TAG_OWNER: tagOwner,
-  S3_LETSENCRYPT_ACCOUNT_KEY_NAME: s3LetsEncryptAccountKeyName,
 } = process.env;
 
 const logger = getLogger('s3');
 
-const s3 = new S3Client({ region });
+const accountKeyClient = new S3Client({ region });
+
+// Sanitize common name for use as S3 key prefix: '*' is not allowed in keys, replace with '_'.
+const sanitizePrefix = (commonName) => commonName.replace('*', '_');
+
+// Per-region PEM bucket naming convention: '<prefix>-<accountId>-<region>-an' (account-regional namespace).
+const pemBucketName = (targetRegion) => `${pemBucketPrefix}-${awsAccountId}-${targetRegion}-an`;
 
 export const loadAccountKey = async () => {
   try {
-    const { Body: body } = await s3.send(
+    const { Body: body } = await accountKeyClient.send(
       new GetObjectCommand({
-        Bucket: bucketName,
-        Key: s3LetsEncryptAccountKeyName,
+        Bucket: accountKeyBucket,
+        Key: accountKeyName,
       }),
     );
     logger.info(`Account Key loaded.`);
@@ -31,10 +39,10 @@ export const loadAccountKey = async () => {
       logger.info(`Account Key not found.`);
       const privateKey = await acme.crypto.createPrivateKey();
       logger.info(`Account Key generated.`);
-      await s3.send(
+      await accountKeyClient.send(
         new PutObjectCommand({
-          Bucket: bucketName,
-          Key: s3LetsEncryptAccountKeyName,
+          Bucket: accountKeyBucket,
+          Key: accountKeyName,
           Body: privateKey,
           ServerSideEncryption: 'AES256',
           Tagging: `application=${tagApplication}&owner=${tagOwner}`,
@@ -49,19 +57,23 @@ export const loadAccountKey = async () => {
   }
 };
 
-const saveObject = async (name, content) => {
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucketName,
-      Key: name,
-      Body: content,
-      ServerSideEncryption: 'AES256',
-      Tagging: `application=${tagApplication}&owner=${tagOwner}`,
-    }),
-  );
-};
+export const saveFullCertificate = async (commonName, targetRegion, fullCertificate, certificatePrivateKey) => {
+  const bucket = pemBucketName(targetRegion);
+  const prefix = sanitizePrefix(commonName);
+  const s3 = new S3Client({ region: targetRegion });
 
-export const saveFullCertificate = async (fullCertificate, certificatePrivateKey) => {
+  const saveObject = async (name, content) => {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: `${prefix}/${name}`,
+        Body: content,
+        ServerSideEncryption: 'AES256',
+        Tagging: `application=${tagApplication}&owner=${tagOwner}`,
+      }),
+    );
+  };
+
   const [certificate, intermediate, root] = acme.crypto.splitPemChain(fullCertificate);
   await Promise.all([
     saveObject('full', fullCertificate),
@@ -70,4 +82,6 @@ export const saveFullCertificate = async (fullCertificate, certificatePrivateKey
     saveObject('root', root),
     saveObject('certificateKey', certificatePrivateKey),
   ]);
+
+  logger.info(`PEM saved for ${commonName} in ${targetRegion} (s3://${bucket}/${prefix}/).`);
 };

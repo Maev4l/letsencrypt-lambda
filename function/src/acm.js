@@ -13,16 +13,12 @@ import { getLogger } from './logger';
 const logger = getLogger('acm');
 
 const {
-  CERTIFICATE_REGION: certificateRegion,
-  // Comma-separated list of regions, e.g.: "eu-central-1,us-west-2,ap-southeast-1"
-  SECONDARY_CERTIFICATE_REGIONS: secondaryCertificateRegionsEnv,
   TAG_OWNER: tagOwner,
   TAG_APPLICATION: tagApplication,
 } = process.env;
 
-const secondaryCertificateRegions = secondaryCertificateRegionsEnv
-  ? secondaryCertificateRegionsEnv.split(',').map((r) => r.trim())
-  : [];
+// ARN format: arn:aws:acm:<region>:<account>:certificate/<id>
+const regionFromArn = (arn) => arn.split(':')[3];
 
 const readCertificate = async (client, arn) => {
   const { Certificate: certificate } = await client.send(
@@ -45,7 +41,8 @@ const getCertificateDirectory = async (client, arn) => {
 
 export const getCertificate = async (arn) => {
   try {
-    const client = new ACMClient({ region: certificateRegion });
+    const region = regionFromArn(arn);
+    const client = new ACMClient({ region });
     const certificate = await readCertificate(client, arn);
     const directory = await getCertificateDirectory(client, arn);
 
@@ -58,8 +55,8 @@ export const getCertificate = async (arn) => {
   }
 };
 
-export const findCertificate = async (commonName, client) => {
-  const acmClient = client || new ACMClient({ region: certificateRegion });
+export const findCertificate = async (commonName, region, client) => {
+  const acmClient = client || new ACMClient({ region });
   const paginatorConfig = {
     client: acmClient,
     pageSize: 25,
@@ -107,12 +104,12 @@ export const importCertificate = async (
   fullCertificate,
   commonName,
   directory,
+  regions,
 ) => {
-  const regions = [certificateRegion, ...secondaryCertificateRegions];
   await Promise.all(
     regions.map(async (region) => {
       const client = new ACMClient({ region });
-      const existingCertificate = await findCertificate(commonName, client);
+      const existingCertificate = await findCertificate(commonName, region, client);
       let existingCertificateArn = null;
       if (existingCertificate) {
         const { CertificateArn } = existingCertificate;

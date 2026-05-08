@@ -1,10 +1,10 @@
 # Let's Encrypt Lambda
 
 AWS Lambda that automates Let's Encrypt SSL/TLS certificate issuance,
-renewal, and revocation for a single Route53 hosted zone via the ACME
-DNS-01 challenge. Renewed certificates are imported into AWS
-Certificate Manager across one primary and zero-or-more secondary
-regions.
+renewal, and revocation for one or more Route53 hosted zones via the
+ACME DNS-01 challenge. Renewed certificates are imported into AWS
+Certificate Manager across the destination regions configured per
+domain.
 
 ## Prerequisites
 
@@ -38,6 +38,22 @@ The scheduler triggers `renew` weekly automatically; the manual
 commands are for ad-hoc runs (e.g. validating a new deploy against the
 staging directory by overriding the event payload).
 
+### Renew a single domain
+
+For ad-hoc renewal of one specific domain (e.g., when validating a
+new domain in staging without touching the others):
+
+```bash
+aws lambda invoke \
+  --function-name renew-certificates \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"force":true,"common_name":"*.isnan.eu","directory":"staging"}' \
+  /dev/stdout 2>/dev/null
+```
+
+The `common_name` filters to a single configured domain; `directory`
+overrides the default (production / staging) for that invocation only.
+
 ### Revoke
 
 Rare — typically only when a private key has been exposed.
@@ -59,4 +75,4 @@ aws lambda invoke \
 ## Reference
 
 Architecture, conventions, environment variables, and runtime flow:
-see [`docs/superpowers/specs/2026-05-08-letsencrypt-lambda-foundation.md`](docs/superpowers/specs/2026-05-08-letsencrypt-lambda-foundation.md).
+see [`design.md`](design.md).

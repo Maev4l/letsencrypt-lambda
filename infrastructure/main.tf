@@ -3,8 +3,9 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
+      source = "hashicorp/aws"
+      # >= 6.37 required for S3 bucket account-regional namespace support.
+      version = "~> 6.37"
     }
   }
 
@@ -28,8 +29,3 @@ provider "aws" {
 }
 
 data "aws_caller_identity" "current" {}
-data "aws_partition" "current" {}
-
-data "aws_route53_zone" "main" {
-  name = "${var.domain_name}."
-}

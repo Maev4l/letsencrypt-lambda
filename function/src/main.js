@@ -2,6 +2,7 @@ import acme from 'acme-client';
 import dayjs from 'dayjs';
 
 import { getLogger } from './logger';
+import { loadDomains } from './config';
 import { importCertificate, findCertificate, getCertificate } from './acm';
 import { loadAccountKey, saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
@@ -10,9 +11,6 @@ import { notify } from './sns';
 const logger = getLogger('handler');
 
 const {
-  DOMAIN_HOSTED_ZONE_NAME: domainZoneName,
-  DOMAIN_CERTIFICATE_COMMON_NAME: certificateCommonName,
-  DOMAIN_HOSTED_ZONE_ID: domainZoneId,
   DIRECTORY: defaultDirectory,
   ACME_EMAIL: acmeEmail,
 } = process.env;
@@ -23,90 +21,139 @@ const getDirectoryUrl = (directory) =>
     ? acme.directory.letsencrypt.production
     : acme.directory.letsencrypt.staging;
 
-export const renewCertificates = async (event) => {
-  const { directory = defaultDirectory, force } = event || {};
+// Truncate long error messages to fit Slack constraints (Slack chokes on very long lines).
+const truncate = (s) => (s && s.length > 500 ? `${s.slice(0, 500)}…` : s);
 
-  logger.info(
-    `Certificate renewal (force: ${
-      force ? 'yes' : 'no'
-    }) (domain: '${domainZoneName}' - common name: '${certificateCommonName}') (${directory}) started ...`,
-  );
+const buildMessage = (commonName, directory, result) => {
+  switch (result.status) {
+    case 'renewed':
+      return `Certificate renewed for '${commonName}' (${directory}).`;
+    case 'skipped':
+      return `Certificate check for '${commonName}' (${directory}) — no renewal needed; expires in ${result.daysRemaining} day(s).`;
+    case 'failed':
+      return `Certificate renewal FAILED for '${commonName}' (${directory}): ${truncate(result.error)}.`;
+    default:
+      return `Certificate check for '${commonName}' (${directory}) — unknown status.`;
+  }
+};
 
-  let requestCertificate = false;
+const renewSingleDomain = async (domain, accountKey, directory, force) => {
+  const {
+    common_name: commonName,
+    hosted_zone_id: hostedZoneId,
+    acm_regions: acmRegions,
+    pem_storage_regions: pemStorageRegions = [],
+  } = domain;
+  const [primaryRegion] = acmRegions;
 
-  const existingCertificate = await findCertificate(certificateCommonName);
-  if (!existingCertificate) {
-    requestCertificate = true;
+  const existing = await findCertificate(commonName, primaryRegion);
+  let needRenew = false;
+  let daysRemaining = null;
+  if (!existing) {
+    needRenew = true;
   } else {
-    const { NotAfter } = existingCertificate;
-
-    const diff = dayjs(NotAfter).diff(dayjs(), 'day');
-
-    if (diff >= 0) {
-      logger.info(`Existing certificate will expire in ${diff} day(s).`);
+    daysRemaining = dayjs(existing.NotAfter).diff(dayjs(), 'day');
+    if (daysRemaining >= 0) {
+      logger.info(`Existing certificate for '${commonName}' will expire in ${daysRemaining} day(s).`);
     } else {
-      logger.info(`Existing certificate expired since ${Math.abs(diff)} day(s).`);
+      logger.info(`Existing certificate for '${commonName}' expired since ${Math.abs(daysRemaining)} day(s).`);
     }
-
     // Scheduler runs weekly (rate(7 days), see infrastructure/lambda.tf).
     // We renew when < 30 days remain, giving ~3 weeks of retry budget if a
     // single run fails.
-    if (diff < 30) {
-      // Certificate will expire in less than 30 days
-      requestCertificate = true;
-    }
+    if (daysRemaining < 30) needRenew = true;
   }
 
-  if (requestCertificate || force) {
-    const accountKey = await loadAccountKey();
+  if (!needRenew && !force) {
+    return { status: 'skipped', daysRemaining };
+  }
 
-    const [certificatePrivateKey, certificateCsr] = await acme.crypto.createCsr({
-      commonName: certificateCommonName,
-    });
+  const [privateKey, csr] = await acme.crypto.createCsr({ commonName });
+  logger.info(`CSR generated for '${commonName}'.`);
 
-    logger.info(`Certificate Signing Request generated.`);
+  const client = new acme.Client({
+    directoryUrl: getDirectoryUrl(directory),
+    accountKey,
+    backoffAttempts: 20,
+  });
 
-    const client = new acme.Client({
-      directoryUrl: getDirectoryUrl(directory),
-      accountKey,
-      backoffAttempts: 20,
-    });
+  const fullCertificate = await client.auto({
+    csr,
+    email: acmeEmail,
+    termsOfServiceAgreed: true,
+    challengePriority: ['dns-01'],
+    challengeCreateFn: async (authz, _challenge, keyAuthorization) => {
+      // authz.identifier.value is the actual DNS name to challenge — works for
+      // both wildcards (LE strips '*.') and non-wildcard certs.
+      await createRoute53AcmeRecords(hostedZoneId, authz.identifier.value, keyAuthorization);
+    },
+  });
+  logger.info(`Account url for '${commonName}': ${client.getAccountUrl()}`);
 
-    const fullCertificate = await client.auto({
-      csr: certificateCsr,
-      email: acmeEmail,
-      termsOfServiceAgreed: true,
-      challengePriority: ['dns-01'],
-      challengeCreateFn: async (authz, challenge, keyAuthorization) => {
-        await createRoute53AcmeRecords(domainZoneId, domainZoneName, keyAuthorization);
-      },
-    });
-
-    logger.info(`Account url: ${client.getAccountUrl()}`);
-
-    await saveFullCertificate(fullCertificate, certificatePrivateKey);
-    logger.info(`Certificate saved (domain: '${domainZoneName}') (${directory}).`);
-
-    await importCertificate(
-      certificatePrivateKey,
-      fullCertificate,
-      certificateCommonName,
-      directory,
+  if (pemStorageRegions.length > 0) {
+    await Promise.all(
+      pemStorageRegions.map((r) =>
+        saveFullCertificate(commonName, r, fullCertificate, privateKey),
+      ),
     );
-    const successMessage = `Certificate renewed/created (domain: '${domainZoneName}') (${directory}).`;
-    logger.info(successMessage);
-
-    await notify(successMessage);
-
-    return { statusCode: 200, message: successMessage };
   }
 
-  // Notify even when no renewal needed, so we know the Lambda executed
-  const skipMessage = `Certificate check completed - no renewal needed. Certificate expires in ${dayjs(existingCertificate.NotAfter).diff(dayjs(), 'day')} day(s).`;
-  logger.info(skipMessage);
-  await notify(skipMessage);
+  await importCertificate(privateKey, fullCertificate, commonName, directory, acmRegions);
 
-  return { statusCode: 200, message: skipMessage };
+  return { status: 'renewed' };
+};
+
+export const renewCertificates = async (event = {}) => {
+  const { directory = defaultDirectory, force, common_name: commonNameFilter } = event;
+
+  logger.info(
+    `Certificate renewal (force: ${force ? 'yes' : 'no'}) (directory: '${directory}')${
+      commonNameFilter ? ` (filter: '${commonNameFilter}')` : ''
+    } started ...`,
+  );
+
+  const allDomains = loadDomains();
+  const filtered = commonNameFilter
+    ? allDomains.filter((d) => d.common_name === commonNameFilter)
+    : allDomains;
+
+  if (commonNameFilter && filtered.length === 0) {
+    throw new Error(`Unknown common_name: ${commonNameFilter}`);
+  }
+
+  const accountKey = await loadAccountKey();
+  const results = [];
+
+  for (const domain of filtered) {
+    let result;
+    try {
+      result = await renewSingleDomain(domain, accountKey, directory, force);
+    } catch (e) {
+      logger.error(`Renewal failed for ${domain.common_name}: ${e.message}`);
+      result = { status: 'failed', error: e.message };
+    }
+
+    try {
+      await notify(buildMessage(domain.common_name, directory, result));
+    } catch (e) {
+      // SNS publish failure does NOT escalate — we don't want a Slack outage to
+      // mask a successful renewal. Logged only.
+      logger.error(`SNS publish failed for ${domain.common_name}: ${e.message}`);
+    }
+
+    results.push({ domain: domain.common_name, ...result });
+  }
+
+  const failed = results.filter((r) => r.status === 'failed');
+  if (failed.length > 0) {
+    throw new Error(
+      `Renewal failed for ${failed.length}/${results.length} domain(s): ` +
+        failed.map((f) => `${f.domain} (${f.error})`).join('; '),
+    );
+  }
+
+  logger.info(`Certificate renewal completed (${results.length} domain(s)).`);
+  return { statusCode: 200, results };
 };
 
 export const revokeCertificate = async (event) => {
