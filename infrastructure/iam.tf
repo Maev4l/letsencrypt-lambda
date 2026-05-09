@@ -9,18 +9,13 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   statement {
-    sid    = "S3AccountKey"
+    sid    = "SSMAccountKey"
     effect = "Allow"
     actions = [
-      "s3:GetObject",
-      "s3:PutObject",
-      "s3:PutObjectTagging",
-      "s3:ListBucket",
+      "ssm:GetParameter",
+      "ssm:PutParameter",
     ]
-    resources = [
-      aws_s3_bucket.account_key.arn,
-      "${aws_s3_bucket.account_key.arn}/*",
-    ]
+    resources = [aws_ssm_parameter.account_key.arn]
   }
 
   # PEM buckets — write only. Emitted only when at least one domain has

@@ -14,5 +14,6 @@ await esbuild.build({
     '@aws-sdk/client-route-53',
     '@aws-sdk/client-s3',
     '@aws-sdk/client-sns',
+    '@aws-sdk/client-ssm',
   ],
 });

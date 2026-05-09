@@ -3,39 +3,6 @@ locals {
   pem_regions = toset(flatten([for d in var.domains : d.pem_storage_regions]))
 }
 
-# ---------- Account-key bucket (legacy global namespace, preserved) ----------
-
-resource "aws_s3_bucket" "account_key" {
-  bucket        = var.account_key_bucket
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "account_key" {
-  bucket = aws_s3_bucket.account_key.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "account_key" {
-  bucket = aws_s3_bucket.account_key.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "account_key" {
-  bucket = aws_s3_bucket.account_key.id
-  policy = templatefile("${path.module}/templates/bucket-security-policy.json.tpl", {
-    bucket_arn = aws_s3_bucket.account_key.arn
-  })
-}
-
 # ---------- PEM buckets (per-region, account-regional namespace) ----------
 
 resource "aws_s3_bucket" "pem" {

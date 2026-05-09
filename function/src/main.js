@@ -4,7 +4,8 @@ import dayjs from 'dayjs';
 import { getLogger } from './logger';
 import { loadDomains } from './config';
 import { importCertificate, findCertificate, getCertificate } from './acm';
-import { loadAccountKey, saveFullCertificate } from './s3';
+import { loadAccountKey } from './ssm';
+import { saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
 

@@ -3,17 +3,16 @@ locals {
   lambda_zip_path = "${path.module}/../function/dist/lambda.zip"
 
   lambda_environment_variables = {
-    REGION             = var.region
-    DOMAINS_CONFIG     = jsonencode(var.domains)
-    PEM_BUCKET_PREFIX  = var.pem_bucket_prefix
-    AWS_ACCOUNT_ID     = data.aws_caller_identity.current.account_id
-    ACCOUNT_KEY_BUCKET = var.account_key_bucket
-    ACCOUNT_KEY_NAME   = var.s3_letsencrypt_account_key_name
-    TOPIC_ARN          = var.topic_arn
-    TAG_APPLICATION    = var.tag_application
-    TAG_OWNER          = var.tag_owner
-    DIRECTORY          = var.directory
-    ACME_EMAIL         = "maeval.nightingale@gmail.com"
+    REGION                = var.region
+    DOMAINS_CONFIG        = jsonencode(var.domains)
+    PEM_BUCKET_PREFIX     = var.pem_bucket_prefix
+    AWS_ACCOUNT_ID        = data.aws_caller_identity.current.account_id
+    ACCOUNT_KEY_PARAMETER = aws_ssm_parameter.account_key.name
+    TOPIC_ARN             = var.topic_arn
+    TAG_APPLICATION       = var.tag_application
+    TAG_OWNER             = var.tag_owner
+    DIRECTORY             = var.directory
+    ACME_EMAIL            = "maeval.nightingale@gmail.com"
   }
 }
 

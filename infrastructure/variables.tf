@@ -1,5 +1,5 @@
 variable "region" {
-  description = "AWS region for the deployment (Lambda + account-key bucket + Route53 client)."
+  description = "AWS region for the deployment (Lambda + Route53 client)."
   type        = string
   default     = "eu-central-1"
 }
@@ -13,6 +13,15 @@ variable "domains" {
     pem_storage_regions = optional(list(string), []) # empty = no PEM storage
   }))
 
+  # Default preserves the existing single-domain deployment.
+  default = [
+    {
+      common_name         = "*.isnan.eu"
+      hosted_zone_id      = "ZWC66FN0XU6P9"
+      acm_regions         = ["us-east-1", "eu-central-1"]
+      pem_storage_regions = []
+    },
+  ]
 }
 
 variable "pem_bucket_prefix" {
@@ -21,16 +30,10 @@ variable "pem_bucket_prefix" {
   default     = "letsencrypt-pems"
 }
 
-variable "account_key_bucket" {
-  description = "S3 bucket for the ACME account key (legacy global namespace, eu-central-1)."
+variable "account_key_parameter" {
+  description = "SSM Parameter Store name for the ACME account key (SecureString)."
   type        = string
-  default     = "letsencrypt-lambda-storage"
-}
-
-variable "s3_letsencrypt_account_key_name" {
-  description = "S3 key name for the ACME account key."
-  type        = string
-  default     = "account-key"
+  default     = "letsencrypt-lambda-account-key"
 }
 
 variable "topic_arn" {

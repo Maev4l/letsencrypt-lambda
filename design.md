@@ -49,9 +49,10 @@ letsencrypt-lambda/
 │   ├── src/
 │   │   ├── main.js               Two handlers: renewCertificates, revokeCertificate.
 │   │   ├── config.js              loadDomains() — parse + validate DOMAINS_CONFIG on cold start.
+│   │   ├── ssm.js                 loadAccountKey() — read/auto-generate ACME account key in SSM Parameter Store.
 │   │   ├── acm.js                ACM: findCertificate, importCertificate (multi-region), getCertificate (+ directory tag).
-│   │   ├── route53.js            Route53: createRoute53AcmeRecords (UPSERT), resetRoute53AcmeRecords (UNUSED).
-│   │   ├── s3.js                 S3: loadAccountKey (auto-creates), saveFullCertificate.
+│   │   ├── route53.js            Route53: createRoute53AcmeRecords (UPSERT only — no challengeRemoveFn wired).
+│   │   ├── s3.js                 S3: saveFullCertificate (per-region PEM writes via account-regional namespace).
 │   │   ├── sns.js                SNS: notify() — publishes JSON alert to alerting-events topic, target=slack.
 │   │   └── logger.js             winston factory: getLogger(category) → singleton per category.
 │   ├── bin/                      esbuild output (gitignored).
@@ -60,11 +61,12 @@ letsencrypt-lambda/
 └── infrastructure/               Terraform root module.
     ├── main.tf                   Terraform >=1.10, AWS provider ~>6.0, S3 backend (use_lockfile=true), default_tags.
     ├── variables.tf              Inputs (region, domain_name, schedule_rate, lambda_memory_size, etc.).
-    ├── outputs.tf                Lambda ARNs, S3 bucket name, IAM role ARN.
+    ├── outputs.tf                Lambda ARNs, IAM role ARN.
     ├── lambda.tf                 Two lambda-function modules + lambda-trigger-scheduler. ACME_EMAIL hardcoded here.
-    ├── iam.tf                    aws_iam_policy 'letsencrypt-lambda': SNS + S3 + Route53 + ACM.
+    ├── iam.tf                    aws_iam_policy 'letsencrypt-lambda': SNS + SSM + S3 (PEM, dynamic) + Route53 + ACM.
     ├── route53.tf                Placeholder _acme-challenge TXT record (ttl 60, value "dummy").
-    ├── s3.tf                     Account-key bucket (legacy global namespace) + per-region PEM buckets (account-regional namespace) via for_each over var.domains.
+    ├── s3.tf                     Per-region PEM buckets (account-regional namespace) via for_each over var.domains.
+    ├── ssm.tf                     aws_ssm_parameter.account_key — SecureString holding the ACME account key (encrypted via alias/aws/ssm).
     ├── templates/
     │   └── bucket-security-policy.json.tpl   Reusable bucket policy (deny non-TLS / non-SSE / public-ACL).
     └── sns.tf                    data "aws_sns_topic" "alerting" — references shared alerting-events topic.
@@ -85,7 +87,7 @@ Two handlers in one zip, two Lambda functions deployed.
 1. Resolve directory: event arg → fallback to `DIRECTORY` env.
 2. `loadDomains()` (cold-start cached) — parses + validates `DOMAINS_CONFIG`.
 3. Optional filter to a single domain by `event.common_name`. If filter matches no entry → throws `Unknown common_name: <value>`.
-4. `loadAccountKey()` once (shared across all domains).
+4. `loadAccountKey()` from SSM Parameter Store (parameter name from `ACCOUNT_KEY_PARAMETER` env var; SecureString decrypted via `alias/aws/ssm`); auto-generate via `acme.crypto.createPrivateKey()` and persist via `PutParameter` if `ParameterNotFound` or empty value. Called once (shared across all domains).
 5. **Sequential** iteration over the filtered list. For each domain, call `renewSingleDomain(domain, accountKey, directory, force)`:
    1. `findCertificate(common_name, primaryRegion)` in `acm_regions[0]`.
    2. Decide:
@@ -110,7 +112,7 @@ Two handlers in one zip, two Lambda functions deployed.
 **Flow:**
 
 1. If no `arn` → return `{ statusCode: 400, message: 'No ARN was specified' }`.
-2. `loadAccountKey()` from S3.
+2. `loadAccountKey()` from SSM (same module as renew flow).
 3. `getCertificate(arn)` (derives region from the ARN via `arn.split(':')[3]`): returns `null` on
    `ResourceNotFoundException` → handler returns 404. Otherwise returns
    `{ certificate: PEM, directory: <tag value or 'production'> }`.
@@ -137,7 +139,7 @@ Manual invoke shortcuts in `function/package.json`:
 EventBridge Scheduler ── rate(7d) ──▶ renewCertificates
                                             │
                                             ├── ACM[primary]    ListCertificates / DescribeCertificate
-                                            ├── S3              GetObject  account-key  (PutObject if absent)
+                                            ├── SSM             GetParameter  account-key  (PutParameter if absent or empty)
                                             ├── acme-client     client.auto({ challengePriority: ['dns-01'] })
                                             │       │
                                             │       └── challengeCreateFn ──▶ Route53  ChangeResourceRecordSets
@@ -148,7 +150,7 @@ EventBridge Scheduler ── rate(7d) ──▶ renewCertificates
 
 aws lambda invoke ─▶ revokeCertificate
                             │
-                            ├── S3   GetObject account-key
+                            ├── SSM  GetParameter account-key
                             ├── ACM  GetCertificate + ListTagsForCertificate
                             └── ACME revokeCertificate
 ```
@@ -165,8 +167,7 @@ All env vars are set by Terraform from `infrastructure/lambda.tf` `local.lambda_
 | `DOMAINS_CONFIG`     | `jsonencode(var.domains)`                                    | `config.js`                     | `[{"common_name":"*.isnan.eu","hosted_zone_id":"ZWC66FN0XU6P9","acm_regions":["us-east-1","eu-central-1"],"pem_storage_regions":[]}]` |
 | `PEM_BUCKET_PREFIX`  | `var.pem_bucket_prefix`                                      | `s3.js`                         | `letsencrypt-pems`                                                                                                                    |
 | `AWS_ACCOUNT_ID`     | `data.aws_caller_identity.current.account_id`                | `s3.js`                         | `671123374425`                                                                                                                        |
-| `ACCOUNT_KEY_BUCKET` | `var.account_key_bucket`                                     | `s3.js`                         | `letsencrypt-lambda-storage`                                                                                                          |
-| `ACCOUNT_KEY_NAME`   | `var.s3_letsencrypt_account_key_name`                        | `s3.js`                         | `account-key`                                                                                                                         |
+| `ACCOUNT_KEY_PARAMETER` | `var.account_key_parameter` (or `aws_ssm_parameter.account_key.name`) | `ssm.js`                        | `letsencrypt-lambda-account-key`                        |
 | `TOPIC_ARN`          | `var.topic_arn`                                              | `sns.js`                        | `arn:aws:sns:eu-central-1:671123374425:alerting-events`                                                                               |
 | `TAG_APPLICATION`    | `var.tag_application`                                        | `acm.js`, `s3.js`               | `letsencrypt-lambda`                                                                                                                  |
 | `TAG_OWNER`          | `var.tag_owner`                                              | `acm.js`, `s3.js`               | `terraform`                                                                                                                           |
@@ -178,6 +179,7 @@ Notes:
 - `DOMAINS_CONFIG` is parsed once per cold start by `config.js#loadDomains()`. Each entry validates `common_name`, `hosted_zone_id`, non-empty `acm_regions`, optional `pem_storage_regions` (default `[]`), and uniqueness of `common_name`.
 - `DIRECTORY` is the runtime default; the renew event payload can override it per-invocation.
 - `event.common_name` (renew event) filters to a single configured domain; absent / empty = process all.
+- `ACCOUNT_KEY_PARAMETER` resolves to the SSM parameter ARN inside `ssm.js`. Lambda has `ssm:GetParameter` + `ssm:PutParameter` on that ARN; the `PutParameter` permission supports the auto-generate path and is invoked only on `ParameterNotFound` or empty placeholder.
 - `ACME_EMAIL` is the only value not exposed as a Terraform variable.
 
 ---
@@ -200,7 +202,7 @@ Notes:
   `getLogger('s3')`, `getLogger('sns')`. One logger per module, created
   at module load.
 - **Module ↔ AWS service**: each `src/<service>.js` wraps exactly one
-  AWS service (`acm.js`, `route53.js`, `s3.js`, `sns.js`).
+  AWS service (`acm.js`, `route53.js`, `s3.js`, `sns.js`, `ssm.js`).
 - **AWS SDK v3** clients are imported per service from `@aws-sdk/client-*`.
   Each module instantiates its own client at module scope. Region comes
   from `REGION` env, except `acm.js` which constructs per-region
@@ -247,8 +249,8 @@ Notes:
 
 - **esbuild** bundles `function/src/main.js` → `function/bin/main.js`,
   format **CJS**, target `node22`, minified.
-- **`@aws-sdk/client-{acm,route-53,s3,sns}`** marked `external` in the
-  esbuild config — provided by the Lambda Node.js 22 runtime, not
+- **`@aws-sdk/client-{acm,route-53,s3,sns,ssm}`** marked `external` in
+  the esbuild config — provided by the Lambda Node.js 22 runtime, not
   bundled.
 - **Lambda zip** built by `yarn package` (clean → build → `zip -r dist/lambda.zip .`
   from `bin/`). The zip contains a single bundled `main.js`.
