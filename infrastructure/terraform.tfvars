@@ -7,4 +7,10 @@ domains = [
     acm_regions         = ["us-east-1", "eu-central-1"]
     pem_storage_regions = []
   },
+  {
+    common_name         = "brigitte-le-roux.com"
+    hosted_zone_id      = "Z10238282ED2UHGM8STZA"
+    acm_regions         = ["us-east-1", "eu-central-1"]
+    pem_storage_regions = []
+  },
 ]

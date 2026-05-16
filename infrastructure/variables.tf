@@ -13,15 +13,6 @@ variable "domains" {
     pem_storage_regions = optional(list(string), []) # empty = no PEM storage
   }))
 
-  # Default preserves the existing single-domain deployment.
-  default = [
-    {
-      common_name         = "*.isnan.eu"
-      hosted_zone_id      = "ZWC66FN0XU6P9"
-      acm_regions         = ["us-east-1", "eu-central-1"]
-      pem_storage_regions = []
-    },
-  ]
 }
 
 variable "pem_bucket_prefix" {
