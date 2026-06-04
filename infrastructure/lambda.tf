@@ -18,7 +18,7 @@ locals {
 
 # Lambda function: renew certificates
 module "renew_certificates" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.6.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
 
   function_name = "renew-certificates"
   zip = {
@@ -37,7 +37,7 @@ module "renew_certificates" {
 
 # Lambda function: revoke certificate
 module "revoke_certificate" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.6.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
 
   function_name = "revoke-certificate"
   zip = {
@@ -56,7 +56,7 @@ module "revoke_certificate" {
 
 # EventBridge Scheduler trigger for certificate renewal
 module "renew_certificates_scheduler" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.6.0"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.7.1"
 
   function_name       = module.renew_certificates.function_name
   function_arn        = module.renew_certificates.function_arn
