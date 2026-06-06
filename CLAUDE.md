@@ -27,7 +27,7 @@ EventBridge Scheduler; revocation is invoked manually.
 
 ```
 letsencrypt-lambda/
-├── README.md                     Stale (Serverless-era); see gaps doc.
+├── README.md                     Describes the renewal flow and manual operations.
 ├── package.json                  Root yarn scripts (no deps): backend:build, backend:deploy, infra:apply.
 ├── .prettierrc.js                trailingComma=all, printWidth=100, singleQuote.
 ├── .gitignore                    Ignores node_modules, dist/, bin/, .terraform/, *.tfstate*.
@@ -38,14 +38,18 @@ letsencrypt-lambda/
 │   ├── esbuild.config.mjs        Bundle src/main.js → bin/main.js, CJS, node22, AWS SDK external.
 │   ├── yarn.lock
 │   ├── src/
-│   │   ├── main.js               Two handlers: renewCertificates, revokeCertificate.
+│   │   ├── main.js               Four handlers: dispatchRenewals, renewCertificates, handleRenewalFailure, revokeCertificate.
 │   │   ├── config.js              loadDomains() — parse + validate DOMAINS_CONFIG on cold start.
 │   │   ├── ssm.js                 loadAccountKey() — read/auto-generate ACME account key in SSM Parameter Store.
 │   │   ├── acm.js                ACM: findCertificate, importCertificate (multi-region), getCertificate (+ directory tag).
 │   │   ├── route53.js            Route53: createRoute53AcmeRecords (UPSERT only — no challengeRemoveFn wired).
 │   │   ├── s3.js                 S3: saveFullCertificate (per-region PEM writes via account-regional namespace).
 │   │   ├── sns.js                SNS: notify() — publishes JSON alert to alerting-events topic, target=slack.
+│   │   ├── lambda.js             invokeRenewal() — async 'Event' invoke of the renew worker per domain.
+│   │   ├── format.js             Pure helpers: truncate, selectDispatchTargets, buildFailureMessage; unit-tested.
 │   │   └── logger.js             winston factory: getLogger(category) → singleton per category.
+│   ├── test/
+│   │   └── format.test.js        node --test unit tests for format.js (first tests in the repo, zero new deps).
 │   ├── bin/                      esbuild output (gitignored).
 │   └── dist/                     lambda.zip (gitignored).
 │
@@ -53,8 +57,8 @@ letsencrypt-lambda/
     ├── main.tf                   Terraform >=1.10, AWS provider ~>6.0, S3 backend (use_lockfile=true), default_tags.
     ├── variables.tf              Inputs (region, domain_name, schedule_rate, lambda_memory_size, etc.).
     ├── outputs.tf                Lambda ARNs, IAM role ARN.
-    ├── lambda.tf                 Two lambda-function modules + lambda-trigger-scheduler. ACME_EMAIL hardcoded here.
-    ├── iam.tf                    aws_iam_policy 'letsencrypt-lambda': SNS + SSM + S3 (PEM, dynamic) + Route53 + ACM.
+    ├── lambda.tf                 Four lambda-function modules + lambda-trigger-scheduler + aws_lambda_function_event_invoke_config. ACME_EMAIL hardcoded here.
+    ├── iam.tf                    Three aws_iam_policy resources: 'letsencrypt-lambda' (shared: SNS/SSM/S3/Route53/ACM + InvokeFailureHandler), 'dispatch-certificate-renewals' (lambda:InvokeFunction on worker), 'handle-certificate-renewal-failure' (sns:Publish on alerting topic).
     ├── route53.tf                Placeholder _acme-challenge TXT record (ttl 60, value "dummy").
     ├── s3.tf                     Per-region PEM buckets (account-regional namespace) via for_each over var.domains.
     ├── ssm.tf                     aws_ssm_parameter.account_key — SecureString holding the ACME account key (encrypted via alias/aws/ssm).
@@ -67,9 +71,26 @@ letsencrypt-lambda/
 
 ## 3. Runtime architecture
 
-Two handlers in one zip, two Lambda functions deployed.
+Four handlers in one zip, four Lambda functions deployed.
+
+### `dispatchRenewals` (`main.dispatchRenewals`)
+
+**Scheduler entry point.** Reads domain config and fans out one async per-domain invoke to the renew worker, so each certificate gets its own full 180 s timeout and Lambda's built-in async retries instead of sharing one sequential, timeout-prone invocation.
+
+**Event shape:** `{ directory?: 'production' | 'staging', force?: boolean, common_name?: string }` — all optional.
+
+**Flow:**
+
+1. `loadDomains()` (cold-start cached) — parses + validates `DOMAINS_CONFIG`.
+2. `selectDispatchTargets(allDomains, common_name)` — returns all domains or throws if a filter matches nothing.
+3. Parallel `Promise.all` over targets: `invokeRenewal(commonName, directory, force)` fires an async `InvocationType: 'Event'` invoke of `renew-certificates` per domain.
+4. Returns `{ statusCode: 200, dispatched: [<common_name>, …] }`.
+
+**Env vars used:** `REGION`, `DOMAINS_CONFIG`, `RENEW_FUNCTION_NAME` only (no ACME/ACM/SNS/S3/SSM).
 
 ### `renewCertificates` (`main.renewCertificates`)
+
+**Invoked per-domain by `dispatch-certificate-renewals` (async 'Event'); also supports direct manual invoke.**
 
 **Event shape:** `{ directory?: 'production' | 'staging', force?: boolean, common_name?: string }` — all optional.
 
@@ -112,32 +133,55 @@ Two handlers in one zip, two Lambda functions deployed.
 6. `client.revokeCertificate(certificate)`.
 7. Returns `{ statusCode: 200, message: 'Certificate <arn> revoked successfully' }`.
 
+### `handleRenewalFailure` (`main.handleRenewalFailure`)
+
+**Async OnFailure destination for `renew-certificates`.** Runs only after Lambda's 2 built-in async retries are exhausted — including timeout/OOM crashes that kill the renew handler before it can send its own SNS alert — ensuring hard failures still reach Slack with the offending domain identified.
+
+**Input:** Lambda async invocation record (not the original renew event).
+
+**Flow:**
+
+1. `buildFailureMessage(record)` — extracts `common_name` and `directory` from `record.requestPayload`, error from `record.responsePayload.errorMessage` / `.errorType`, and attempt count from `record.requestContext.approximateInvokeCount`. Falls back gracefully for sparse timeout/OOM records.
+2. Logs the failure message.
+3. `notify(message)` — publishes to Slack via SNS. Unlike `renewCertificates`, SNS errors are NOT swallowed: this IS the last-resort alerter, so a publish failure should surface as a CloudWatch error metric.
+4. Returns `{ statusCode: 200 }`.
+
+**Env vars used:** `REGION`, `TOPIC_ARN` only.
+
 ### Triggers
 
-| Function             | Trigger                                                                                            |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `renew-certificates` | EventBridge Scheduler `rate(7 days)` (schedule name `renew-certificates-schedule`); manual invoke. |
-| `revoke-certificate` | Manual `aws lambda invoke` only (no scheduler, no event source).                                   |
+| Function                              | Trigger                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch-certificate-renewals`       | EventBridge Scheduler `rate(7 days)` (schedule name `renew-certificates-schedule`); manual invoke.                        |
+| `renew-certificates`                  | Async `'Event'` invoke from `dispatch-certificate-renewals` (one per domain); also supports direct manual invoke.         |
+| `handle-certificate-renewal-failure`  | `renew-certificates` async OnFailure destination — fires after 2 retries exhausted (incl. timeout/OOM); no direct invoke. |
+| `revoke-certificate`                  | Manual `aws lambda invoke` only (no scheduler, no event source).                                                          |
 
 Manual invoke shortcuts in `function/package.json`:
 
-- `yarn renew` → `aws lambda invoke --function-name renew-certificates …`
+- `yarn renew` → `aws lambda invoke --function-name dispatch-certificate-renewals …`
 - `yarn renew:force` → same with `--payload '{"force":true}'`
 
 ### Data flow
 
 ```
-EventBridge Scheduler ── rate(7d) ──▶ renewCertificates
+EventBridge Scheduler ── rate(7d) ──▶ dispatchRenewals
                                             │
-                                            ├── ACM[primary]    ListCertificates / DescribeCertificate
-                                            ├── SSM             GetParameter  account-key  (PutParameter if absent or empty)
-                                            ├── acme-client     client.auto({ challengePriority: ['dns-01'] })
-                                            │       │
-                                            │       └── challengeCreateFn ──▶ Route53  ChangeResourceRecordSets
-                                            │                                 (UPSERT TXT _acme-challenge.<zone>)
-                                            ├── S3              PutObject × 5 per region (if pem_storage_regions configured)
-                                            ├── ACM[acm_regions…]  ImportCertificate (parallel)
-                                            └── SNS             Publish → alerting-events (target=slack)
+                                            └── Lambda Event invoke × N ──▶ renewCertificates (one per domain)
+                                                                                    │
+                                                                                    ├── ACM[primary]    ListCertificates / DescribeCertificate
+                                                                                    ├── SSM             GetParameter  account-key  (PutParameter if absent or empty)
+                                                                                    ├── acme-client     client.auto({ challengePriority: ['dns-01'] })
+                                                                                    │       │
+                                                                                    │       └── challengeCreateFn ──▶ Route53  ChangeResourceRecordSets
+                                                                                    │                                 (UPSERT TXT _acme-challenge.<zone>)
+                                                                                    ├── S3              PutObject × 5 per region (if pem_storage_regions configured)
+                                                                                    ├── ACM[acm_regions…]  ImportCertificate (parallel)
+                                                                                    ├── SNS             Publish → alerting-events (target=slack)  [success/skip/fail]
+                                                                                    │
+                                                                                    └── (OnFailure, after 2 retries exhausted) ──▶ handleRenewalFailure
+                                                                                                                                          │
+                                                                                                                                          └── SNS  Publish → alerting-events (last-resort crash alert)
 
 aws lambda invoke ─▶ revokeCertificate
                             │
@@ -150,26 +194,29 @@ aws lambda invoke ─▶ revokeCertificate
 
 ## 4. Environment variables
 
-All env vars are set by Terraform from `infrastructure/lambda.tf` `local.lambda_environment_variables`. Both Lambda functions receive the same set.
+Terraform sets three distinct env var sets in `infrastructure/lambda.tf`. Not all functions receive the full shared set — each function gets only what it needs.
 
-| Name                    | Source                                                                | Consumer module(s)              | Example / default                                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `REGION`                | `var.region`                                                          | `route53.js`, `s3.js`, `sns.js` | `eu-central-1`                                                                                                                        |
-| `DOMAINS_CONFIG`        | `jsonencode(var.domains)`                                             | `config.js`                     | `[{"common_name":"*.isnan.eu","hosted_zone_id":"ZWC66FN0XU6P9","acm_regions":["us-east-1","eu-central-1"],"pem_storage_regions":[]}]` |
-| `PEM_BUCKET_PREFIX`     | `var.pem_bucket_prefix`                                               | `s3.js`                         | `letsencrypt-pems`                                                                                                                    |
-| `AWS_ACCOUNT_ID`        | `data.aws_caller_identity.current.account_id`                         | `s3.js`                         | `671123374425`                                                                                                                        |
-| `ACCOUNT_KEY_PARAMETER` | `var.account_key_parameter` (or `aws_ssm_parameter.account_key.name`) | `ssm.js`                        | `letsencrypt-lambda-account-key`                                                                                                      |
-| `TOPIC_ARN`             | `var.topic_arn`                                                       | `sns.js`                        | `arn:aws:sns:eu-central-1:671123374425:alerting-events`                                                                               |
-| `TAG_APPLICATION`       | `var.tag_application`                                                 | `acm.js`, `s3.js`               | `letsencrypt-lambda`                                                                                                                  |
-| `TAG_OWNER`             | `var.tag_owner`                                                       | `acm.js`, `s3.js`               | `terraform`                                                                                                                           |
-| `DIRECTORY`             | `var.directory`                                                       | `main.js`                       | `production` (or `staging`)                                                                                                           |
-| `ACME_EMAIL`            | **Hardcoded in `infrastructure/lambda.tf`** (not a variable)          | `main.js`                       | `maeval.nightingale@gmail.com` (accepted gap)                                                                                         |
+| Name                    | Source                                                                | Consumer module(s)              | Functions                                                  | Example / default                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `REGION`                | `var.region`                                                          | `route53.js`, `s3.js`, `sns.js`, `lambda.js` | all four                                    | `eu-central-1`                                                                                                                        |
+| `DOMAINS_CONFIG`        | `jsonencode(var.domains)`                                             | `config.js`                     | renew, dispatcher                                          | `[{"common_name":"*.isnan.eu","hosted_zone_id":"ZWC66FN0XU6P9","acm_regions":["us-east-1","eu-central-1"],"pem_storage_regions":[]}]` |
+| `RENEW_FUNCTION_NAME`   | `module.renew_certificates.function_name`                             | `lambda.js`                     | dispatcher only                                            | `renew-certificates`                                                                                                                  |
+| `PEM_BUCKET_PREFIX`     | `var.pem_bucket_prefix`                                               | `s3.js`                         | renew, revoke                                              | `letsencrypt-pems`                                                                                                                    |
+| `AWS_ACCOUNT_ID`        | `data.aws_caller_identity.current.account_id`                         | `s3.js`                         | renew, revoke                                              | `671123374425`                                                                                                                        |
+| `ACCOUNT_KEY_PARAMETER` | `var.account_key_parameter` (or `aws_ssm_parameter.account_key.name`) | `ssm.js`                       | renew, revoke                                              | `letsencrypt-lambda-account-key`                                                                                                      |
+| `TOPIC_ARN`             | `var.topic_arn`                                                       | `sns.js`                        | renew, revoke, failure handler                             | `arn:aws:sns:eu-central-1:671123374425:alerting-events`                                                                               |
+| `TAG_APPLICATION`       | `var.tag_application`                                                 | `acm.js`, `s3.js`               | renew, revoke                                              | `letsencrypt-lambda`                                                                                                                  |
+| `TAG_OWNER`             | `var.tag_owner`                                                       | `acm.js`, `s3.js`               | renew, revoke                                              | `terraform`                                                                                                                           |
+| `DIRECTORY`             | `var.directory`                                                       | `main.js`                       | renew, revoke                                              | `production` (or `staging`)                                                                                                           |
+| `ACME_EMAIL`            | **Hardcoded in `infrastructure/lambda.tf`** (not a variable)          | `main.js`                       | renew, revoke                                              | `maeval.nightingale@gmail.com` (accepted gap)                                                                                         |
 
 Notes:
 
+- **Dispatcher** (`dispatch-certificate-renewals`) receives only `REGION`, `DOMAINS_CONFIG`, `RENEW_FUNCTION_NAME` — no ACME/ACM/SNS/SSM/S3 access.
+- **Failure handler** (`handle-certificate-renewal-failure`) receives only `REGION`, `TOPIC_ARN` — no domain config or ACME credentials.
 - `DOMAINS_CONFIG` is parsed once per cold start by `config.js#loadDomains()`. Each entry validates `common_name`, `hosted_zone_id`, non-empty `acm_regions`, optional `pem_storage_regions` (default `[]`), and uniqueness of `common_name`.
 - `DIRECTORY` is the runtime default; the renew event payload can override it per-invocation.
-- `event.common_name` (renew event) filters to a single configured domain; absent / empty = process all.
+- `event.common_name` (dispatcher or renew event) filters to a single configured domain; absent / empty = process all.
 - `ACCOUNT_KEY_PARAMETER` resolves to the SSM parameter ARN inside `ssm.js`. Lambda has `ssm:GetParameter` + `ssm:PutParameter` on that ARN; the `PutParameter` permission supports the auto-generate path and is invoked only on `ParameterNotFound` or empty placeholder.
 - `ACME_EMAIL` is the only value not exposed as a Terraform variable.
 
@@ -189,11 +236,11 @@ Notes:
   `function/`); root `package.json` has no `dependencies` and just shells
   out to `yarn --cwd function`.
 - **Logger:** `winston` with category labels per module —
-  `getLogger('handler')`, `getLogger('acm')`, `getLogger('route53')`,
+  `getLogger('handler')`, `getLogger('acm')`, `getLogger('lambda')`, `getLogger('route53')`,
   `getLogger('s3')`, `getLogger('sns')`. One logger per module, created
   at module load.
 - **Module ↔ AWS service**: each `src/<service>.js` wraps exactly one
-  AWS service (`acm.js`, `route53.js`, `s3.js`, `sns.js`, `ssm.js`).
+  AWS service (`acm.js`, `lambda.js`, `route53.js`, `s3.js`, `sns.js`, `ssm.js`).
 - **AWS SDK v3** clients are imported per service from `@aws-sdk/client-*`.
   Each module instantiates its own client at module scope. Region comes
   from `REGION` env, except `acm.js` which constructs per-region
@@ -224,10 +271,11 @@ Notes:
   domain's `acm_regions` (primary first, then secondaries). Existing
   cert ARN is reused per-region when the domain matches (in-place
   renewal — same ARN, no consumer churn).
-- **IAM:** scoped where API allows — S3 actions on bucket ARN + objects,
-  SNS `Publish` on the alerting topic ARN. Route53 and ACM use `*`
-  (action-level only). Single `aws_iam_policy` `letsencrypt-lambda`
-  attached to both functions via `additional_policy_arns`.
+- **IAM:** three scoped policies, each attached only to the function(s) that need it:
+  - `letsencrypt-lambda` (shared by renew + revoke): SNS, SSM, S3, Route53, ACM, plus `lambda:InvokeFunction` on the failure handler (Lambda delivers async OnFailure records using the source function's execution role — the renew worker's role must be able to invoke the failure handler). Revoke also gains the InvokeFunction permission — harmless, accepted for simplicity.
+  - `dispatch-certificate-renewals`: `lambda:InvokeFunction` on the renew worker only.
+  - `handle-certificate-renewal-failure`: `sns:Publish` on the alerting topic only.
+- **Async failure routing:** `aws_lambda_function_event_invoke_config` on `renew-certificates` sets `maximum_retry_attempts = 2` and routes `on_failure` to `handle-certificate-renewal-failure`. Delivery uses the renew worker's execution role.
 - **Backend:** S3 with `use_lockfile = true` (S3 native locking, no
   DynamoDB).
 - **Versions:** Terraform `>= 1.10.0`, AWS provider `~> 6.37` (≥ 6.37
@@ -240,9 +288,9 @@ Notes:
 
 - **esbuild** bundles `function/src/main.js` → `function/bin/main.js`,
   format **CJS**, target `node22`, minified.
-- **`@aws-sdk/client-{acm,route-53,s3,sns,ssm}`** marked `external` in
+- **`@aws-sdk/client-{acm,lambda,route-53,s3,sns,ssm}`** marked `external` in
   the esbuild config — provided by the Lambda Node.js 22 runtime, not
-  bundled.
+  bundled. `@aws-sdk/client-lambda` was added for the dispatcher's async invoke.
 - **Lambda zip** built by `yarn package` (clean → build → `zip -r dist/lambda.zip .`
   from `bin/`). The zip contains a single bundled `main.js`.
 - **ESLint 9 flat config** + `eslint-config-prettier`; relaxes
@@ -250,6 +298,7 @@ Notes:
   `no-await-in-loop`, `no-constant-condition`. `import/no-unresolved`
   ignores `^@aws-sdk/`. `import/no-extraneous-dependencies` allows
   devDependencies in `*.config.js` / `*.config.mjs`.
+- **Unit tests:** `function/test/format.test.js` tests `format.js` (pure helpers, no AWS SDK). Run with `yarn --cwd function test` (`node --test`). No new runtime or test dependencies — `node --test` is built into Node.js 22.
 - **Build hash** for Lambda code change detection: `filebase64sha256("../function/bin/main.js")`
   passed as `zip.hash` to the lambda-function module — the bundled JS
   drives diff detection, not the zip itself. **Why:** `dist/lambda.zip`
