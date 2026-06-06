@@ -8,6 +8,8 @@ import { loadAccountKey } from './ssm';
 import { saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
+import { invokeRenewal } from './lambda';
+import { truncate, selectDispatchTargets } from './format';
 
 const logger = getLogger('handler');
 
@@ -21,9 +23,6 @@ const getDirectoryUrl = (directory) =>
   directory === 'production'
     ? acme.directory.letsencrypt.production
     : acme.directory.letsencrypt.staging;
-
-// Truncate long error messages to fit Slack constraints (Slack chokes on very long lines).
-const truncate = (s) => (s && s.length > 500 ? `${s.slice(0, 500)}…` : s);
 
 const buildMessage = (commonName, directory, result) => {
   switch (result.status) {
@@ -114,13 +113,7 @@ export const renewCertificates = async (event = {}) => {
   );
 
   const allDomains = loadDomains();
-  const filtered = commonNameFilter
-    ? allDomains.filter((d) => d.common_name === commonNameFilter)
-    : allDomains;
-
-  if (commonNameFilter && filtered.length === 0) {
-    throw new Error(`Unknown common_name: ${commonNameFilter}`);
-  }
+  const filtered = selectDispatchTargets(allDomains, commonNameFilter);
 
   const accountKey = await loadAccountKey();
   const results = [];
@@ -155,6 +148,29 @@ export const renewCertificates = async (event = {}) => {
 
   logger.info(`Certificate renewal completed (${results.length} domain(s)).`);
   return { statusCode: 200, results };
+};
+
+// Scheduler entry point. Reads the domain config and fans out one async invoke
+// of the renew worker per domain, so each certificate gets its own full timeout
+// and retry budget instead of sharing one sequential, timeout-prone invocation.
+export const dispatchRenewals = async (event = {}) => {
+  const { directory, force, common_name: commonNameFilter } = event;
+
+  const allDomains = loadDomains();
+  const targets = selectDispatchTargets(allDomains, commonNameFilter);
+
+  logger.info(
+    `Dispatching renewals for ${targets.length} domain(s)${
+      commonNameFilter ? ` (filter: '${commonNameFilter}')` : ''
+    }${force ? ' (force)' : ''}.`,
+  );
+
+  const dispatched = targets.map((d) => d.common_name);
+  // Fire all invocations in parallel; each is fire-and-forget ('Event').
+  await Promise.all(dispatched.map((commonName) => invokeRenewal(commonName, directory, force)));
+
+  logger.info(`Dispatched ${dispatched.length} renewal invocation(s).`);
+  return { statusCode: 200, dispatched };
 };
 
 export const revokeCertificate = async (event) => {
