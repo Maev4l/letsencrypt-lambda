@@ -9,7 +9,7 @@ import { saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
 import { invokeRenewal } from './lambda';
-import { truncate, selectDispatchTargets } from './format';
+import { truncate, selectDispatchTargets, buildFailureMessage } from './format';
 
 const logger = getLogger('handler');
 
@@ -171,6 +171,21 @@ export const dispatchRenewals = async (event = {}) => {
 
   logger.info(`Dispatched ${dispatched.length} renewal invocation(s).`);
   return { statusCode: 200, dispatched };
+};
+
+// Async OnFailure destination for renew-certificates. Runs only after Lambda's
+// async auto-retries are exhausted — including timeout/OOM crashes that kill the
+// renew handler before it can send its own SNS alert — so hard failures still
+// reach Slack with the offending domain identified. Receives Lambda's invocation
+// record, not the original event.
+export const handleRenewalFailure = async (record) => {
+  const message = buildFailureMessage(record);
+  logger.error(message);
+  // Unlike renewCertificates, we let notify failures propagate — this handler IS
+  // the last-resort alerter, so a SNS error here should surface as a Lambda
+  // execution failure (CloudWatch Errors metric) rather than being silently lost.
+  await notify(message);
+  return { statusCode: 200 };
 };
 
 export const revokeCertificate = async (event) => {
