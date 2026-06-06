@@ -11,6 +11,7 @@ await esbuild.build({
   // AWS SDK v3 is provided by Lambda runtime
   external: [
     '@aws-sdk/client-acm',
+    '@aws-sdk/client-lambda',
     '@aws-sdk/client-route-53',
     '@aws-sdk/client-s3',
     '@aws-sdk/client-sns',
