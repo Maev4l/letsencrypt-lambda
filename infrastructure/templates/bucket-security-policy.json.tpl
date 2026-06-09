@@ -63,6 +63,18 @@
           ]
         }
       }
+    },
+    {
+      "Sid": "DenyCrossAccountReads",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "${bucket_arn}/*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:PrincipalAccount": "${account_id}"
+        }
+      }
     }
   ]
 }

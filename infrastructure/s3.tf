@@ -41,5 +41,6 @@ resource "aws_s3_bucket_policy" "pem" {
   region   = each.value
   policy = templatefile("${path.module}/templates/bucket-security-policy.json.tpl", {
     bucket_arn = aws_s3_bucket.pem[each.value].arn
+    account_id = data.aws_caller_identity.current.account_id
   })
 }

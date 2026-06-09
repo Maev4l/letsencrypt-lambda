@@ -5,7 +5,7 @@ domains = [
     common_name         = "*.isnan.eu"
     hosted_zone_id      = "ZWC66FN0XU6P9"
     acm_regions         = ["us-east-1", "eu-central-1"]
-    pem_storage_regions = []
+    pem_storage_regions = ["eu-central-1"]
   },
   {
     common_name         = "brigitte-le-roux.com"
