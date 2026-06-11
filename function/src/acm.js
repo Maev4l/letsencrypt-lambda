@@ -116,16 +116,19 @@ export const importCertificate = async (
         existingCertificateArn = CertificateArn;
       }
       const [certificate, ...rest] = acme.crypto.splitPemChain(fullCertificate);
+      // Join chain certs with a newline. Array.join() defaults to a comma separator,
+      // which corrupts a multi-cert chain (e.g. once the Gen-Y X1 cross-sign is appended).
+      const certificateChain = rest.join('\n');
       const params = existingCertificateArn
         ? {
             CertificateArn: existingCertificateArn,
             Certificate: Buffer.from(certificate),
-            CertificateChain: Buffer.from(rest.join()),
+            CertificateChain: Buffer.from(certificateChain),
             PrivateKey: Buffer.from(certificatePrivateKey),
           }
         : {
             Certificate: Buffer.from(certificate),
-            CertificateChain: Buffer.from(rest.join()),
+            CertificateChain: Buffer.from(certificateChain),
             PrivateKey: Buffer.from(certificatePrivateKey),
             Tags: [
               { Key: 'application', Value: tagApplication },

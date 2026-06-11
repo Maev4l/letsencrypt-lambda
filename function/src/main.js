@@ -10,6 +10,7 @@ import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
 import { invokeRenewal } from './lambda';
 import { truncate, selectDispatchTargets, buildFailureMessage } from './format';
+import { bridgeGenYChain } from './genYBridge';
 
 const logger = getLogger('handler');
 
@@ -90,15 +91,19 @@ const renewSingleDomain = async (domain, accountKey, directory, force) => {
   });
   logger.info(`Account url for '${commonName}': ${client.getAccountUrl()}`);
 
+  // Append the ISRG Root X1 cross-sign when the chain ends at the new Gen-Y root, so both
+  // the stored PEM and the ACM import are trusted by stores that lack ISRG Root YR.
+  const bridgedCertificate = bridgeGenYChain(fullCertificate);
+
   if (pemStorageRegions.length > 0) {
     await Promise.all(
       pemStorageRegions.map((r) =>
-        saveFullCertificate(commonName, r, fullCertificate, privateKey),
+        saveFullCertificate(commonName, r, bridgedCertificate, privateKey),
       ),
     );
   }
 
-  await importCertificate(privateKey, fullCertificate, commonName, directory, acmRegions);
+  await importCertificate(privateKey, bridgedCertificate, commonName, directory, acmRegions);
 
   return { status: 'renewed' };
 };
