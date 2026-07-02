@@ -34,7 +34,7 @@ letsencrypt-lambda/
 │
 ├── function/                     Lambda code package (the only npm package).
 │   ├── package.json              Deps: acme-client@5.3.0, dayjs@1.11.13, winston@3.3.3 (strict pins).
-│   ├── eslint.config.js          ESLint 9 flat config + prettier; ignores @aws-sdk/* for import/no-unresolved.
+│   ├── .oxlintrc.json            Oxlint config (env node+es2024; no-console off).
 │   ├── esbuild.config.mjs        Bundle src/main.js → bin/main.js, CJS, node22, AWS SDK external.
 │   ├── yarn.lock
 │   ├── src/
@@ -293,11 +293,12 @@ Notes:
   bundled. `@aws-sdk/client-lambda` was added for the dispatcher's async invoke.
 - **Lambda zip** built by `yarn package` (clean → build → `zip -r dist/lambda.zip .`
   from `bin/`). The zip contains a single bundled `main.js`.
-- **ESLint 9 flat config** + `eslint-config-prettier`; relaxes
-  `import/prefer-default-export`, `no-console`, `no-restricted-syntax`,
-  `no-await-in-loop`, `no-constant-condition`. `import/no-unresolved`
-  ignores `^@aws-sdk/`. `import/no-extraneous-dependencies` allows
-  devDependencies in `*.config.js` / `*.config.mjs`.
+- **Oxlint** (`.oxlintrc.json`); `no-console` off. NOTE: the former ESLint
+  `import/no-unresolved` (ignored `^@aws-sdk/`) and `import/no-extraneous-dependencies`
+  rules have NO oxlint equivalent and were dropped in the migration — oxlint no longer
+  verifies that imports resolve or that dependencies are declared. AWS SDK v3 remains
+  runtime-provided/esbuild-external; that contract is now enforced only by the esbuild
+  config, not the linter.
 - **Unit tests:** `function/test/format.test.js` tests `format.js` (pure helpers, no AWS SDK). Run with `yarn --cwd function test` (`node --test`). No new runtime or test dependencies — `node --test` is built into Node.js 22.
 - **Build hash** for Lambda code change detection: `filebase64sha256("../function/bin/main.js")`
   passed as `zip.hash` to the lambda-function module — the bundled JS
