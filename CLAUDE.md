@@ -28,7 +28,7 @@ EventBridge Scheduler; revocation is invoked manually.
 ```
 letsencrypt-lambda/
 ├── README.md                     Describes the renewal flow and manual operations.
-├── package.json                  Root yarn scripts (no deps): backend:build, backend:deploy, infra:apply.
+├── Makefile                      Root make targets (no deps): backend-build, backend-deploy, infra-apply.
 ├── .prettierrc.js                trailingComma=all, printWidth=100, singleQuote.
 ├── .gitignore                    Ignores node_modules, dist/, bin/, .terraform/, *.tfstate*.
 │

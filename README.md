@@ -40,7 +40,7 @@ domain its own full Lambda timeout and retry budget:
 From the repo root:
 
 ```bash
-yarn backend:deploy
+make backend-deploy
 ```
 
 This builds the Lambda zip (`yarn --cwd function package`, which runs
