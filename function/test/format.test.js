@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { truncate, selectDispatchTargets, buildFailureMessage } from '../src/format.js';
+import { truncate, code, buildAlert, selectDispatchTargets, buildFailureMessage } from '../src/format.js';
 
 test('truncate leaves short strings unchanged', () => {
   assert.equal(truncate('short'), 'short');
@@ -36,10 +36,11 @@ test('buildFailureMessage uses payload fields and the error message', () => {
     requestPayload: { common_name: '*.isnan.eu', directory: 'production' },
     responsePayload: { errorType: 'Error', errorMessage: 'boom' },
   };
-  assert.match(
-    buildFailureMessage(record),
-    /CRASHED for '\*\.isnan\.eu' \(production\) after 3 attempt\(s\): boom\./,
-  );
+  const out = buildFailureMessage(record);
+  assert.match(out, /^# 🔐 Certificate Renewal\n/);
+  assert.match(out, /- \*\*Domain:\*\* \*\.isnan\.eu/);
+  assert.match(out, /- \*\*Directory:\*\* production/);
+  assert.match(out, /- \*\*Status:\*\* renewal CRASHED after 3 attempt\(s\) — `boom`/);
 });
 
 test('buildFailureMessage falls back to the condition when responsePayload is sparse', () => {
@@ -47,10 +48,23 @@ test('buildFailureMessage falls back to the condition when responsePayload is sp
     requestContext: { condition: 'EventAgeExceeded' },
     requestPayload: { common_name: 'x.example', directory: 'staging' },
   };
-  assert.match(
-    buildFailureMessage(record),
-    /CRASHED for 'x\.example' \(staging\) after \? attempt\(s\): EventAgeExceeded\./,
+  const out = buildFailureMessage(record);
+  assert.match(out, /- \*\*Domain:\*\* x\.example/);
+  assert.match(out, /- \*\*Directory:\*\* staging/);
+  assert.match(out, /- \*\*Status:\*\* renewal CRASHED after \? attempt\(s\) — `EventAgeExceeded`/);
+});
+
+test('buildAlert renders the shared header and bold-label bullets', () => {
+  assert.equal(
+    buildAlert('*.isnan.eu', 'production', 'renewed'),
+    '# 🔐 Certificate Renewal\n\n- **Domain:** *.isnan.eu\n- **Directory:** production\n- **Status:** renewed',
   );
+});
+
+test('code fences text and neutralizes embedded backticks', () => {
+  assert.equal(code('boom'), '`boom`');
+  assert.equal(code('a `b` c'), "`a 'b' c`");
+  assert.equal(code(null), '``');
 });
 
 test('truncate returns falsy inputs unchanged', () => {
@@ -71,6 +85,6 @@ test('buildFailureMessage falls back to errorType when errorMessage is absent', 
   };
   assert.match(
     buildFailureMessage(record),
-    /CRASHED for 'y\.example' \(production\) after 2 attempt\(s\): Sandbox\.Timedout\./,
+    /- \*\*Status:\*\* renewal CRASHED after 2 attempt\(s\) — `Sandbox\.Timedout`/,
   );
 });

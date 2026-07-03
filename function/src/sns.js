@@ -14,10 +14,10 @@ export const notify = async (message) => {
     sourceDescription: 'Letsencrypt certificate renewal',
     target: 'slack',
     content: message,
-    // Pin plain rendering: certificate messages contain literal text (wildcard
-    // common names like *.example.com, error strings) that must not be parsed
-    // as Markdown — the alerter defaults to Markdown otherwise.
-    format: 'plain',
+    // Messages are now authored as Markdown (see buildAlert/buildFailureMessage):
+    // an H1 header plus bold-label bullets. Arbitrary error strings are fenced via
+    // code() so wildcard names and stray * _ ` don't get mis-parsed as emphasis.
+    format: 'markdown',
   };
   try {
     const command = new PublishCommand({

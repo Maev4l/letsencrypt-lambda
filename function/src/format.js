@@ -5,6 +5,23 @@
 // Truncate long error messages to fit Slack constraints (Slack chokes on very long lines).
 export const truncate = (s) => (s && s.length > 500 ? `${s.slice(0, 500)}…` : s);
 
+// Wrap arbitrary text as Markdown inline code. The alerter now renders our
+// messages as Markdown, so unpredictable ACME/AWS error strings (which routinely
+// contain *, _, or `) must be fenced or they get mis-parsed as emphasis/code.
+// A backtick inside the text would prematurely close the span, so neutralize it.
+export const code = (s) => `\`${String(s ?? '').replace(/`/g, "'")}\``;
+
+// Assemble the shared Markdown alert shape (H1 header + bold-label bullets) used
+// by every certificate notification, so producers only supply the status line.
+export const buildAlert = (commonName, directory, status) =>
+  [
+    '# 🔐 Certificate Renewal',
+    '',
+    `- **Domain:** ${commonName}`,
+    `- **Directory:** ${directory}`,
+    `- **Status:** ${status}`,
+  ].join('\n');
+
 // Choose which configured domains to act on. Empty/absent filter selects all;
 // a filter matching nothing is a caller error (same contract as the renew handler).
 export const selectDispatchTargets = (domains, commonNameFilter) => {
@@ -28,5 +45,9 @@ export const buildFailureMessage = (record) => {
     record?.responsePayload?.errorMessage ??
     record?.responsePayload?.errorType ??
     condition;
-  return `Certificate renewal CRASHED for '${cn}' (${directory}) after ${attempts} attempt(s): ${truncate(reason)}.`;
+  return buildAlert(
+    cn,
+    directory,
+    `renewal CRASHED after ${attempts} attempt(s) — ${code(truncate(reason))}`,
+  );
 };

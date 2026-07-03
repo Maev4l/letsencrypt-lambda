@@ -9,7 +9,7 @@ import { saveFullCertificate } from './s3';
 import { createRoute53AcmeRecords } from './route53';
 import { notify } from './sns';
 import { invokeRenewal } from './lambda';
-import { truncate, selectDispatchTargets, buildFailureMessage } from './format';
+import { truncate, code, buildAlert, selectDispatchTargets, buildFailureMessage } from './format';
 import { bridgeGenYChain } from './genYBridge';
 
 const logger = getLogger('handler');
@@ -28,13 +28,18 @@ const getDirectoryUrl = (directory) =>
 const buildMessage = (commonName, directory, result) => {
   switch (result.status) {
     case 'renewed':
-      return `Certificate renewed for '${commonName}' (${directory}).`;
+      return buildAlert(commonName, directory, 'renewed');
     case 'skipped':
-      return `Certificate check for '${commonName}' (${directory}) — no renewal needed; expires in ${result.daysRemaining} day(s).`;
+      return buildAlert(
+        commonName,
+        directory,
+        `no renewal needed — expires in ${result.daysRemaining} day(s)`,
+      );
     case 'failed':
-      return `Certificate renewal FAILED for '${commonName}' (${directory}): ${truncate(result.error)}.`;
+      // Fence the error: it is arbitrary text now rendered as Markdown.
+      return buildAlert(commonName, directory, `renewal FAILED — ${code(truncate(result.error))}`);
     default:
-      return `Certificate check for '${commonName}' (${directory}) — unknown status.`;
+      return buildAlert(commonName, directory, 'unknown status');
   }
 };
 
