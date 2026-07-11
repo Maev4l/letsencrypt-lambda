@@ -38,7 +38,7 @@ test('buildFailureMessage uses payload fields and the error message', () => {
   };
   const out = buildFailureMessage(record);
   assert.match(out, /^# 🔐 Certificate Renewal\n/);
-  assert.match(out, /- \*\*Domain:\*\* \*\.isnan\.eu/);
+  assert.match(out, /- \*\*Domain:\*\* `\*\.isnan\.eu`/);
   assert.match(out, /- \*\*Directory:\*\* production/);
   assert.match(out, /- \*\*Status:\*\* renewal CRASHED after 3 attempt\(s\) — `boom`/);
 });
@@ -49,7 +49,7 @@ test('buildFailureMessage falls back to the condition when responsePayload is sp
     requestPayload: { common_name: 'x.example', directory: 'staging' },
   };
   const out = buildFailureMessage(record);
-  assert.match(out, /- \*\*Domain:\*\* x\.example/);
+  assert.match(out, /- \*\*Domain:\*\* `x\.example`/);
   assert.match(out, /- \*\*Directory:\*\* staging/);
   assert.match(out, /- \*\*Status:\*\* renewal CRASHED after \? attempt\(s\) — `EventAgeExceeded`/);
 });
@@ -57,8 +57,15 @@ test('buildFailureMessage falls back to the condition when responsePayload is sp
 test('buildAlert renders the shared header and bold-label bullets', () => {
   assert.equal(
     buildAlert('*.isnan.eu', 'production', 'renewed'),
-    '# 🔐 Certificate Renewal\n\n- **Domain:** *.isnan.eu\n- **Directory:** production\n- **Status:** renewed',
+    '# 🔐 Certificate Renewal\n\n- **Domain:** `*.isnan.eu`\n- **Directory:** production\n- **Status:** renewed',
   );
+});
+
+// A bare hostname like brigitte-le-roux.com is a live website; left as plain
+// text, Slack linkifies + unfurls it and pastes the site's meta description into
+// the alert. Fencing the domain as inline code stops Slack touching it.
+test('buildAlert fences the domain so Slack does not unfurl bare hostnames', () => {
+  assert.match(buildAlert('brigitte-le-roux.com', 'production', 'renewed'), /`brigitte-le-roux\.com`/);
 });
 
 test('code fences text and neutralizes embedded backticks', () => {

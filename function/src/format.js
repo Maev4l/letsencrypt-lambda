@@ -13,11 +13,15 @@ export const code = (s) => `\`${String(s ?? '').replace(/`/g, "'")}\``;
 
 // Assemble the shared Markdown alert shape (H1 header + bold-label bullets) used
 // by every certificate notification, so producers only supply the status line.
+// The domain is fenced via code(): a bare hostname (e.g. brigitte-le-roux.com) is
+// a live website, and left as plain text Slack linkifies + unfurls it, pasting the
+// site's title/meta-description into the alert. Inline code stops that. (Wildcard
+// names like *.isnan.eu dodge it by accident; a bare CN does not.)
 export const buildAlert = (commonName, directory, status) =>
   [
     '# 🔐 Certificate Renewal',
     '',
-    `- **Domain:** ${commonName}`,
+    `- **Domain:** ${code(commonName)}`,
     `- **Directory:** ${directory}`,
     `- **Status:** ${status}`,
   ].join('\n');

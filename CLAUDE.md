@@ -46,7 +46,7 @@ letsencrypt-lambda/
 │   │   ├── s3.js                 S3: saveFullCertificate (per-region PEM writes via account-regional namespace).
 │   │   ├── sns.js                SNS: notify() — publishes JSON alert to alerting-events topic, target=slack, format=markdown.
 │   │   ├── lambda.js             invokeRenewal() — async 'Event' invoke of the renew worker per domain.
-│   │   ├── format.js             Pure helpers: truncate, code, buildAlert, selectDispatchTargets, buildFailureMessage; unit-tested. Alerts are Markdown (buildAlert: header + bold-label bullets; code() fences error strings).
+│   │   ├── format.js             Pure helpers: truncate, code, buildAlert, selectDispatchTargets, buildFailureMessage; unit-tested. Alerts are Markdown (buildAlert: header + bold-label bullets; code() fences the domain and error strings — fencing the domain stops Slack linkifying/unfurling bare hostnames like brigitte-le-roux.com).
 │   │   └── logger.js             winston factory: getLogger(category) → singleton per category.
 │   ├── test/
 │   │   └── format.test.js        node --test unit tests for format.js (first tests in the repo, zero new deps).
