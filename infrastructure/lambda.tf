@@ -31,7 +31,7 @@ locals {
 
 # Lambda function: renew certificates
 module "renew_certificates" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.8.1"
 
   function_name = "renew-certificates"
   zip = {
@@ -50,7 +50,7 @@ module "renew_certificates" {
 
 # Lambda function: revoke certificate
 module "revoke_certificate" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.8.1"
 
   function_name = "revoke-certificate"
   zip = {
@@ -69,7 +69,7 @@ module "revoke_certificate" {
 
 # Lambda function: fan-out dispatcher (scheduler entry point)
 module "dispatch_certificate_renewals" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.8.1"
 
   function_name = "dispatch-certificate-renewals"
   zip = {
@@ -88,7 +88,7 @@ module "dispatch_certificate_renewals" {
 
 # Lambda function: OnFailure destination for renew-certificates
 module "handle_certificate_renewal_failure" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.7.1"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-function?ref=v1.8.1"
 
   function_name = "handle-certificate-renewal-failure"
   zip = {
@@ -121,7 +121,7 @@ resource "aws_lambda_function_event_invoke_config" "renew" {
 
 # EventBridge Scheduler trigger for certificate renewal
 module "renew_certificates_scheduler" {
-  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.7.1"
+  source = "github.com/Maev4l/terraform-modules//modules/lambda-trigger-scheduler?ref=v1.8.1"
 
   function_name       = module.dispatch_certificate_renewals.function_name
   function_arn        = module.dispatch_certificate_renewals.function_arn
