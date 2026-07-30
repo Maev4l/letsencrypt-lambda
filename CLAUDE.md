@@ -32,6 +32,10 @@ letsencrypt-lambda/
 ├── .prettierrc.js                trailingComma=all, printWidth=100, singleQuote.
 ├── .gitignore                    Ignores node_modules, dist/, bin/, .terraform/, *.tfstate*.
 │
+├── docs/superpowers/             Design docs kept alongside the code (not consumed at runtime).
+│   ├── specs/                    Per-feature design specs (multi-domain, SSM account key, resilient renewal).
+│   └── plans/                    Matching implementation plans.
+│
 ├── function/                     Lambda code package (the only npm package).
 │   ├── package.json              Deps: acme-client@5.3.0, dayjs@1.11.13, winston@3.3.3 (strict pins).
 │   ├── .oxlintrc.json            Oxlint config (env node+es2024; no-console off).
@@ -42,6 +46,7 @@ letsencrypt-lambda/
 │   │   ├── config.js              loadDomains() — parse + validate DOMAINS_CONFIG on cold start.
 │   │   ├── ssm.js                 loadAccountKey() — read/auto-generate ACME account key in SSM Parameter Store.
 │   │   ├── acm.js                ACM: findCertificate, importCertificate (multi-region), getCertificate (+ directory tag).
+│   │   ├── genYBridge.js         bridgeGenYChain() — appends the embedded "Root YR by X1" cross-sign when the issued chain terminates at Let's Encrypt's new Gen-Y root (ISRG Root YR), which ACM/CloudFront still reject as untrusted. No-op + idempotent for X-series chains.
 │   │   ├── route53.js            Route53: createRoute53AcmeRecords (UPSERT only — no challengeRemoveFn wired).
 │   │   ├── s3.js                 S3: saveFullCertificate (per-region PEM writes via account-regional namespace).
 │   │   ├── sns.js                SNS: notify() — publishes JSON alert to alerting-events topic, target=slack, format=markdown.
@@ -54,8 +59,9 @@ letsencrypt-lambda/
 │   └── dist/                     lambda.zip (gitignored).
 │
 └── infrastructure/               Terraform root module.
-    ├── main.tf                   Terraform >=1.10, AWS provider ~>6.0, S3 backend (use_lockfile=true), default_tags.
+    ├── main.tf                   Terraform >=1.10, AWS provider ~>6.37, S3 backend (use_lockfile=true), default_tags.
     ├── variables.tf              Inputs (region, domain_name, schedule_rate, lambda_memory_size, etc.).
+    ├── terraform.tfvars          Committed values for the variables above.
     ├── outputs.tf                Lambda ARNs, IAM role ARN.
     ├── lambda.tf                 Four lambda-function modules + lambda-trigger-scheduler + aws_lambda_function_event_invoke_config. ACME_EMAIL hardcoded here.
     ├── iam.tf                    Three aws_iam_policy resources: 'letsencrypt-lambda' (shared: SNS/SSM/S3/Route53/ACM + InvokeFailureHandler), 'dispatch-certificate-renewals' (lambda:InvokeFunction on worker), 'handle-certificate-renewal-failure' (sns:Publish on alerting topic).
@@ -108,9 +114,10 @@ Four handlers in one zip, four Lambda functions deployed.
       - `force === true` → renew.
       - Else → return `{ status: 'skipped', daysRemaining }`.
    3. On renew: generate CSR; run `acme-client` `auto()` with `challengeCreateFn` that UPSERTs `_acme-challenge.<authz.identifier.value>` TXT in the domain's `hosted_zone_id` (uses `authz.identifier.value` — the canonical challenge target — not a hardcoded zone name).
-   4. If `pem_storage_regions.length > 0`: parallel `saveFullCertificate(common_name, region, …)` across each region — writes 5 objects to `${PEM_BUCKET_PREFIX}-${AWS_ACCOUNT_ID}-${region}-an/<sanitized-common-name>/`.
-   5. `importCertificate(privateKey, fullCert, common_name, directory, acm_regions)` — parallel ACM imports across the configured regions, reusing existing ARN per-region when found.
-   6. Return `{ status: 'renewed' }`.
+   4. `bridgeGenYChain(fullCert)` — if the issued chain terminates at Let's Encrypt's Gen-Y root (`Root YR`), append the embedded `Root YR by X1` cross-sign so the chain reaches the broadly-trusted ISRG Root X1. **Why:** ACM/CloudFront reject Root-YR-terminated chains as "untrusted CA", and LE does not expose the X1-terminated chain via ACME (`preferredChain` has no effect). No-op for X-series chains; idempotent. RSA hierarchy only (we issue RSA CSRs). The bridged PEM is what gets stored *and* imported below.
+   5. If `pem_storage_regions.length > 0`: parallel `saveFullCertificate(common_name, region, …)` across each region — writes 5 objects to `${PEM_BUCKET_PREFIX}-${AWS_ACCOUNT_ID}-${region}-an/<sanitized-common-name>/`.
+   6. `importCertificate(privateKey, bridgedCert, common_name, directory, acm_regions)` — parallel ACM imports across the configured regions, reusing existing ARN per-region when found.
+   7. Return `{ status: 'renewed' }`.
 6. Per-domain result handling (inside the same loop):
    - Wrap step 5 in try/catch; on throw, log and set `result = { status: 'failed', error: e.message }`.
    - Always publish one SNS notification carrying common name + directory + status text. SNS publish failures are logged but do NOT escalate.
@@ -159,8 +166,8 @@ Four handlers in one zip, four Lambda functions deployed.
 
 Manual invoke shortcuts in `function/package.json`:
 
-- `yarn renew` → `aws lambda invoke --function-name dispatch-certificate-renewals …`
-- `yarn renew:force` → same with `--payload '{"force":true}'`
+- `yarn --cwd function renew` → `aws lambda invoke --function-name dispatch-certificate-renewals …`
+- `yarn --cwd function renew:force` → same with `--payload '{"force":true}'`
 
 ### Data flow
 
@@ -175,6 +182,7 @@ EventBridge Scheduler ── rate(7d) ──▶ dispatchRenewals
                                                                                     │       │
                                                                                     │       └── challengeCreateFn ──▶ Route53  ChangeResourceRecordSets
                                                                                     │                                 (UPSERT TXT _acme-challenge.<zone>)
+                                                                                    ├── genYBridge      bridgeGenYChain() — append X1 cross-sign if chain ends at Root YR
                                                                                     ├── S3              PutObject × 5 per region (if pem_storage_regions configured)
                                                                                     ├── ACM[acm_regions…]  ImportCertificate (parallel)
                                                                                     ├── SNS             Publish → alerting-events (target=slack)  [success/skip/fail]
@@ -233,8 +241,8 @@ Notes:
   no `^` / `~` (e.g. `"acme-client": "5.3.0"`).
 - **Date math via `dayjs`** only — never `moment`.
 - **Yarn** (not npm). Yarn workspaces are NOT used (single package under
-  `function/`); root `package.json` has no `dependencies` and just shells
-  out to `yarn --cwd function`.
+  `function/`); there is **no root `package.json`** — the root `Makefile`
+  is the entry point and shells out to `yarn --cwd function`.
 - **Logger:** `winston` with category labels per module —
   `getLogger('handler')`, `getLogger('acm')`, `getLogger('lambda')`, `getLogger('route53')`,
   `getLogger('s3')`, `getLogger('sns')`. One logger per module, created
@@ -254,14 +262,15 @@ Notes:
 ### Terraform
 
 - **Custom modules** from `github.com/Maev4l/terraform-modules`, pinned
-  by ref:
+  by ref (currently `v1.8.1`):
   - `modules/lambda-function` — manages role, log group, function (one
     instance per Lambda).
   - `modules/lambda-trigger-scheduler` — EventBridge Scheduler trigger.
 - **Lambda architecture:** `arm64` (Graviton). Memory 128 MB, timeout 180 s.
 - **Log retention:** 7 days.
 - **Deployment style:** **zip-based** (not Docker). The zip is built
-  locally (`yarn package`) before `terraform apply`. The Docker / ECR
+  locally before `terraform apply` — `make backend-deploy` does both
+  (`yarn --cwd function package`, then `make infra-apply`). The Docker / ECR
   guidance in the global CLAUDE.md does NOT apply here.
 - **S3 bucket:** `force_destroy = true` (per global rules). SSE-AES256
   enforced. Public access fully blocked. Bucket policy denies
@@ -291,7 +300,7 @@ Notes:
 - **`@aws-sdk/client-{acm,lambda,route-53,s3,sns,ssm}`** marked `external` in
   the esbuild config — provided by the Lambda Node.js 22 runtime, not
   bundled. `@aws-sdk/client-lambda` was added for the dispatcher's async invoke.
-- **Lambda zip** built by `yarn package` (clean → build → `zip -r dist/lambda.zip .`
+- **Lambda zip** built by `yarn --cwd function package` (clean → build → `zip -r dist/lambda.zip .`
   from `bin/`). The zip contains a single bundled `main.js`.
 - **Oxlint** (`.oxlintrc.json`); `no-console` off. NOTE: the former ESLint
   `import/no-unresolved` (ignored `^@aws-sdk/`) and `import/no-extraneous-dependencies`

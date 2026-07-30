@@ -35,25 +35,38 @@ domain its own full Lambda timeout and retry budget:
 - [Terraform](https://www.terraform.io/) `>= 1.10`.
 - [Yarn](https://yarnpkg.com/) (any recent 1.x).
 
-## Deploy
+## Build & deploy
 
-From the repo root:
+The repo has no root `package.json`; the root `Makefile` is the entry
+point and shells out to `yarn --cwd function`.
 
 ```bash
-make backend-deploy
+make backend-build    # esbuild bundle only -> function/bin/main.js
+make backend-deploy   # bundle + zip, then terraform apply
+make infra-apply      # terraform apply only
 ```
 
-This builds the Lambda zip (`yarn --cwd function package`, which runs
-esbuild then zips `function/bin/`) and runs
+`make backend-deploy` builds the Lambda zip (`yarn --cwd function
+package`, which runs esbuild then zips `function/bin/`) and runs
 `terraform -chdir=infrastructure apply -auto-approve`.
+
+Lint and tests run from the `function/` package:
+
+```bash
+yarn --cwd function lint
+yarn --cwd function test
+```
 
 ## Manual operations
 
 ### Renew
 
 ```bash
-yarn renew         # Dispatches renewals (skips certs with >= 30 days remaining).
-yarn renew:force   # Dispatches renewals, forcing immediate renewal for all domains.
+# Dispatches renewals (skips certs with >= 30 days remaining).
+yarn --cwd function renew
+
+# Dispatches renewals, forcing immediate renewal for all domains.
+yarn --cwd function renew:force
 ```
 
 These invoke `dispatch-certificate-renewals`, which fans out to
